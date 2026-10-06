@@ -39,3 +39,6 @@ Append dated milestones. Preserve previous entries and distinguish evidence leve
 
 ## 2026-10-06 — Concurrent task briefs prepared
 Owner requested easier task on existing browser Sarvam thread and harder task on Gemini 3.1 Pro in a new tab. Published MODULE-002 and MODULE-003 briefs; both use pinned MODULE-001 as base. Gemini submission is transported/tested/pushed through browser Sarvam. Dispatch outcome is tracked separately; no completion claim yet.
+
+## 2026-10-06 — Batch accepted by API Sarvam
+Main specification commit: 774b1b476d084c6ec80382189f8e49210c5c8a8e. API Sarvam accepted the two-task batch at epoch 19 after event 103. Actual navigation to the previous Sarvam thread was observed. Per-site dispatch/model verification is still pending; neither module is claimed complete. Root agent instructions updated to preserve the owner's two-task request.

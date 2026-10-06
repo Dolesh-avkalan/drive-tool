@@ -26,3 +26,6 @@ It is not merged or deployed. Worker evidence reports 36 passing tests; there ha
 - Do not silently proceed to deployment or add Google Drive credentials.
 
 The owner requested this folder so another session can resume by fetching it. New sessions must actually retrieve the repo; these notes do not give automatic access or continuous monitoring.
+
+## Latest steering: concurrent batch
+Owner authorized MODULE-002 and MODULE-003 together. Read their briefs and session/DECISIONS.md D010. API Sarvam accepted the batch at epoch 19 after event 103. Do not dispatch duplicates; inspect its live event log for actual per-site delivery/model selection or blockers. Gemini output is captured and sent to browser Sarvam for testing/push. MODULE-001 remains unmerged. This newer note supersedes the single-module resume sequence above.

@@ -1,7 +1,7 @@
 # Current status
 
 Checkpoint date: 2026-10-06 (Asia/Calcutta).
-Stage: MODULE-001 delivered; MODULE-002 and MODULE-003 specified for concurrent browser work. Dispatch confirmation pending.
+Stage: MODULE-001 delivered; MODULE-002 and MODULE-003 specified for concurrent browser work. API Sarvam accepted dispatch; per-site setup is being checked.
 
 ## Completed and directly observed
 - Public drive-tool repository created by Dolesh.
@@ -36,3 +36,6 @@ Only the in-memory contract is implemented. There is no real Drive or local file
 - Existing VPS had roughly 1.3 GB free disk in its last inspected health report; recheck before installation.
 - Concurrent browser tasks authorized: MODULE-002 on existing Sarvam thread; MODULE-003 on Gemini 3.1 Pro in a separate tab. Confirm live dispatch/status before assuming either is running.
 - No implementation branch has been merged, and drive-tool is not deployed on the VPS or PC.
+
+## Concurrent batch dispatch
+API messenger accepted the batch in this session, epoch 19 after event 103. It has returned to the actual previous Sarvam conversation URL (seen in browser navigation) and is running. Per-site submissions and Gemini model selection have not yet been verified by the director at this checkpoint. Read live events before duplicating work. No merge or deployment authorized for this batch.

@@ -7,7 +7,7 @@ These files record this project's continuity. Verify live repository heads and h
 - Codex is the director. Codex owns plans, architecture, specifications, acceptance criteria, verification, and integration decisions.
 - Delegate implementation and test execution to browser chatbots. Do not silently become the implementer or test runner.
 - API Sarvam is the browser messenger; logged-in browser Sarvam is the initial implementer.
-- Start small, with one scoped module at a time.
+- Keep modules small. The owner authorizes a two-module batch: easy MODULE-002 on the existing Sarvam thread and harder MODULE-003 on Gemini 3.1 Pro in a separate tab. Keep outputs and branches isolated.
 - Stabilize on the VPS before deploying a tagged stable version to the PC.
 - Persist progress, decisions, blockers, evidence, and next steps in session/ after every meaningful milestone and before ending a work session.
 
