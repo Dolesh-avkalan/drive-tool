@@ -42,3 +42,9 @@ Owner requested easier task on existing browser Sarvam thread and harder task on
 
 ## 2026-10-06 — Batch accepted by API Sarvam
 Main specification commit: 774b1b476d084c6ec80382189f8e49210c5c8a8e. API Sarvam accepted the two-task batch at epoch 19 after event 103. Actual navigation to the previous Sarvam thread was observed. Per-site dispatch/model verification is still pending; neither module is claimed complete. Root agent instructions updated to preserve the owner's two-task request.
+
+## 2026-10-06 — Messenger stall diagnosed and recovery started
+Owner observed Gemini idle. Direct API status confirmed messenger idle; events show its first empty response preceded director guidance, so the guidance did not stop that first run. A second run also ended with empty text. No agent stop/reset was used.
+Actual UI evidence showed 'Selected 3.1 Pro Advanced reasoning'; collapsed 'Pro' was not evidence of wrong model. Messenger had navigated the same tab rather than creating the requested second tab.
+GitHub independently confirmed MODULE-002 commit bfbae511a538cff22b642fcd771b7a189029f7e8 and evidence file (worker-reported 71 passing tests). Gemini task had not been submitted.
+Sent short recovery instruction; API returned started. Pending: verify two-tab setup and actual MODULE-003 dispatch, then preserve Gemini output through browser Sarvam.

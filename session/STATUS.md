@@ -39,3 +39,8 @@ Only the in-memory contract is implemented. There is no real Drive or local file
 
 ## Concurrent batch dispatch
 API messenger accepted the batch in this session, epoch 19 after event 103. It has returned to the actual previous Sarvam conversation URL (seen in browser navigation) and is running. Per-site submissions and Gemini model selection have not yet been verified by the director at this checkpoint. Read live events before duplicating work. No merge or deployment authorized for this batch.
+
+## Recovery checkpoint — 2026-10-06
+MODULE-002 is pushed at bfbae511a538cff22b642fcd771b7a189029f7e8 on feature/module-002-listing. Its evidence reports 71 passing tests on Python 3.12.13 in Sarvam's sandbox; not independently rerun or merged.
+API messenger went idle with '(Sarvam returned no text)' at events 134/135 before the director guidance, then again at 158/159 after guidance. Gemini was not dispatched in those runs. It mistakenly used the Sarvam tab for Gemini and confused the short 'Pro' button label with the menu's explicit 'Selected 3.1 Pro Advanced reasoning' checkmark. No stop/reset was called.
+A focused recovery instruction was accepted after event 160: restore the same Sarvam thread in a separate tab, keep Gemini selected at 3.1 Pro, deliver MODULE-003 without redispatching MODULE-002, then capture/test/push through browser Sarvam. Verify current events before assuming recovery completed.
