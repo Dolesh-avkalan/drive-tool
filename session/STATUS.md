@@ -1,7 +1,7 @@
 # Current status
 
 Checkpoint date: 2026-10-06 (Asia/Calcutta).
-Stage: first small module delivered; review and independent verification pending.
+Stage: MODULE-001 delivered; MODULE-002 and MODULE-003 specified for concurrent browser work. Dispatch confirmation pending.
 
 ## Completed and directly observed
 - Public drive-tool repository created by Dolesh.
@@ -34,5 +34,5 @@ Only the in-memory contract is implemented. There is no real Drive or local file
 - PC OS and chosen storage roots have not been supplied.
 - Authorized Google Drive folders and Google OAuth setup are not supplied.
 - Existing VPS had roughly 1.3 GB free disk in its last inspected health report; recheck before installation.
-- No ongoing task is scheduled by this checkpoint.
+- Concurrent browser tasks authorized: MODULE-002 on existing Sarvam thread; MODULE-003 on Gemini 3.1 Pro in a separate tab. Confirm live dispatch/status before assuming either is running.
 - No implementation branch has been merged, and drive-tool is not deployed on the VPS or PC.

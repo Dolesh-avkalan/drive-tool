@@ -36,3 +36,7 @@ GitHub commit existence was directly verified. Test execution is reported by bro
 
 ## D009 — Repository checkpoint is mandatory (2026-10-06)
 Maintain session/ with current status, decisions, chronological progress, connection guidance, and session history. AGENTS.md points future agents to it. Update after significant progress and before ending a work session. Never store secrets here.
+
+## D010 — Two concurrent modules (2026-10-06)
+Owner authorizes two modules at a time, superseding the one-at-a-time limit for this batch. Browser Sarvam continues its MODULE-001 thread for easy MODULE-002 (pagination); Gemini 3.1 Pro gets harder MODULE-003 (bounded read-only local adapter) in another tab. Both branch from pinned MODULE-001, use disjoint files, and do not merge/deploy.
+Gemini cannot push; API messenger captures its complete output and asks browser Sarvam to assemble, execute tests, and push MODULE-003 on its own branch. API messenger does not invent or independently implement missing code. Model selection must be visibly verified; no silent substitute.
