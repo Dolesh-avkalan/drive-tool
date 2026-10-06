@@ -1,0 +1,7 @@
+# Messenger usage audit — 2026-10-06
+
+Read-only /api/chat/status after quota exhaustion reports model sarvam-105b, running=false, epoch=19; cumulative usage counters: calls=890, prompt_tokens=34819781, completion_tokens=589222. Counter reset/lifetime semantics and monetary billing have not been independently verified. These totals must NOT be attributed entirely to MODULE-003 or the last dispatch. Earlier observed calls=852, so 38 model calls accumulated since that observation; a prompt/completion token delta is unavailable.
+
+Observed wasted dispatch behavior: lengthy plans instead of action, repeated tab switches and irrelevant checks, wrong attachment-button click, retries while a modal blocked browser tools, invalid argument names/missing target or text, and resending full task bundles. Director allowed the loop to continue too long and repeated large inline payloads. Raw token counters are not a verified invoice.
+
+Architectural correction proposed, not implemented: finite messenger jobs with fresh compact context, brief content supplied once/referenced by task ID, small browser observations scoped to composer/control/response, minimal acknowledgments, bounded actions/model calls/token budget, fail on repeated tool error, stop when delivery is verified, durable external task ledger. Director review must distinguish successful browser delivery from model plans. No additional paid model calls should be dispatched until user restores quota and the transport budget is agreed.
