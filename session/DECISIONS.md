@@ -52,3 +52,7 @@ Owner's priorities: stable, light, modular, and almost boring behavior. Keep sto
 ## D013 — Codex leads its development team (2026-10-15)
 
 Dolesh explicitly requests that Codex take project responsibility and address Gemini/Sarvam as its team, by name or concrete role, without calling them workers or calling him the owner. New briefs should say "I will get approval" or explain a dependency and parallel work, rather than attributing blame or coordination to Dolesh. Codex owns assignments, review, design and delivery. This supersedes earlier role labels in new communication; historical evidence remains unchanged. User authority and approval requirements are preserved.
+
+## D014 — Direct access without full-drive mapping or manual staging (2026-10-15)
+
+Drive Tool must let any authorized agent locate and read permitted files in place. Known references resolve directly without recursive enumeration; unknown-file search is bounded and reports continuation/exhaustion honestly. No mandatory drive mirror/index or copy into a special folder. The underlying source permission and per-agent policy both apply; a reference is not a grant. Streaming, limits, precise failures, cancellation and multi-agent isolation require separate modules. Requirements and explicit current gaps are in session/FILE-ACCESS-REQUIREMENTS.md. This is a design requirement, not a completed connector/service claim.

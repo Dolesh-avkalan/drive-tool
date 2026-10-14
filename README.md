@@ -1,10 +1,10 @@
 # Drive Tool — director plan and architecture
 
-Owner: Dolesh. Director: Codex in the current session.
-Status: specification only; no implementation or tests are claimed complete.
+Project lead: Codex in the current session; development team: Gemini and Sarvam.
+Status: the read-only core candidate passed actual cloud validation; see session/STATUS.md for exact revisions and evidence. The service and Google Drive connector remain planned.
 
 ## Goal
-An agent can search, retrieve, collect, transfer, and organize files in authorized Google Drive folders and configured local storage roots. Test on the Ubuntu VPS first, stabilize a pinned release, then deploy that release on Dolesh's PC.
+An agent can search, retrieve, collect, transfer, and organize files in authorized Google Drive folders and configured local storage roots. It should access permitted files where they already live, without a mandatory whole-drive mapping/index or manual staging copy. The precise direct-access requirements and current gaps are in session/FILE-ACCESS-REQUIREMENTS.md. Deployment targets and scope are chosen per milestone; accepting the local core does not deploy a service.
 
 ## Division of work
 The director owns architecture, interfaces, task briefs, acceptance criteria, integration decisions, and verification. Browser chatbots implement and execute tests. Sarvam operates the browser, delivers briefs, waits for completion, and returns evidence. A chatbot's success claim is insufficient: require commands, outputs, source revision, environment, and artifacts. Use an independent capable chatbot for review of authorization, deletion, transfer recovery, and credentials.
