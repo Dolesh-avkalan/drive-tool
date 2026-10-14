@@ -1,6 +1,6 @@
 # Resume Drive Tool here
 
-Last checkpoint: 2026-10-06, Asia/Calcutta.
+Last checkpoint: 2026-10-14, Asia/Calcutta. Read STATUS.md for active tasks; the October 6 messenger details below are historical.
 Repository: https://github.com/Dolesh-avkalan/drive-tool
 Owner: Dolesh (GitHub: Dolesh-avkalan).
 
@@ -13,6 +13,10 @@ Owner: Dolesh (GitHub: Dolesh-avkalan).
 6. ../tasks/MODULE-001.md — exact initial task.
 
 ## Where we stopped
+
+Development resumed after migrating the browser host to a persistent local Ubuntu VM on Windows. Owner requires Codex to direct and own design, with Gemini and browser Sarvam implementing and executing. Gemini d008 reviewed correction c2b324d as CHANGES REQUIRED; d009 independent Sarvam tests are running; d010's narrow resource/probe correction is prepared. Do not duplicate a live worker task. Main contains specifications/checkpoints, while implementation remains on feature branches. Cloud-box testing is a later owner milestone, not deployment to the old browser VPS. See CORE-ACCEPTANCE.md and STATUS.md.
+
+Historical initial milestone:
 The first delegation loop succeeded: director brief -> API Sarvam -> browser Sarvam -> implementation and worker tests -> GitHub feature branch -> messenger report -> director artifact review.
 MODULE-001 is on feature/module-001-storage-contract at 194d4ad57de6dd895c6eaaf7faf4d08583eab02b.
 It is not merged or deployed. Worker evidence reports 36 passing tests; there has been no independent test execution or VPS test run.
