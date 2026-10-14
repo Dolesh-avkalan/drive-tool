@@ -114,3 +114,7 @@ Retrieved raw logs via Cloud Shell SSH transfer and visible-terminal chunk trans
 
 Director accepts integrated read-only core's cloud compatibility gate. No workers active. Next: concrete merge recommendation for owner approval and a separately specified enumeration budget before agent-facing use. Listing currently materializes all direct children; bounded reads do not imply bounded enumeration. Google Drive/OAuth, writes, jobs/API and production deployment remain separate future work. No complete-product claim.
 
+
+## D013 — Codex leads its development team (2026-10-15)
+
+Dolesh explicitly requests that Codex take project responsibility and address Gemini/Sarvam as its team, by name or concrete role, without calling them workers or calling him the owner. New briefs should say "I will get approval" or explain a dependency and parallel work, rather than attributing blame or coordination to Dolesh. Codex owns assignments, review, design and delivery. This supersedes earlier role labels in new communication; historical evidence remains unchanged. User authority and approval requirements are preserved.

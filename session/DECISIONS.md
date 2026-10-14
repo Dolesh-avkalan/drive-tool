@@ -48,3 +48,7 @@ Owner explicitly resumed Drive Tool after browser migration and reiterated that 
 ## D012 — Predictable modular core (2026-10-14)
 
 Owner's priorities: stable, light, modular, and almost boring behavior. Keep storage contract, adapters, listing, jobs, API and policy separated. Prefer standard library and explicit bounded behavior, deterministic errors and narrow scopes. Correct concrete correctness/resource defects before adding connectors or writes. Require raw evidence and independent review for containment and descriptor ownership; 82 passing worker tests alone do not establish acceptance. Do not add frameworks or rewrite modules without a demonstrated need. Director owns specifications, acceptance and integration; workers implement and execute.
+
+## D013 — Codex leads its development team (2026-10-15)
+
+Dolesh explicitly requests that Codex take project responsibility and address Gemini/Sarvam as its team, by name or concrete role, without calling them workers or calling him the owner. New briefs should say "I will get approval" or explain a dependency and parallel work, rather than attributing blame or coordination to Dolesh. Codex owns assignments, review, design and delivery. This supersedes earlier role labels in new communication; historical evidence remains unchanged. User authority and approval requirements are preserved.
