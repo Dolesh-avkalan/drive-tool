@@ -18,7 +18,7 @@ MODULE-003 assembly evidence reports 67 passing tests on Python 3.11/3.12 after 
 - d005: Gemini 4 Argon review of pinned MODULE-003 against the brief, especially directory symlink swap protection on platforms ignoring no-follow opens.
 - d006: browser Sarvam independent rerun of the pinned suite and deterministic synthetic regressions, separating actual behavior from simulated platform behavior.
 
-Results pending. Neither task authorizes implementation-branch changes. The director plans and reviews; browser workers implement and execute tests.
+d005 and d006 completed. Gemini requests changes; Sarvam's saved actual-kernel reproducer exposed outside synthetic bytes, metadata and listings despite 67 passing tests. MODULE-003 is not accepted. d007 is queued for corrections on NEW branch feature/module-003-review-fixes, based on 110b27e; old branches unchanged. Atomic no-follow opens without O_DIRECTORY plus immediate descriptor type checks are the selected correction direction, subject to worker regression evidence and independent re-review. Neither task authorizes implementation-branch changes. The director plans and reviews; browser workers implement and execute tests.
 
 ## Next
 
