@@ -8,6 +8,10 @@ Owner explicitly resumed Drive Tool and reinforced director/worker separation, s
 
 Gemini d008 (4 argon, high, zero repairs) returned CHANGES REQUIRED for child resource handoff and probe/test-gate issues. Fresh Sarvam d009 (zero repairs) reports both interpreter suites passing but independently reproduces the child-descriptor leak, plus real old-fail/new-pass containment. Worker lacked GitHub write capability and returned PUSH_BLOCKED; owner then connected GitHub. Follow-up d010 asks that worker to publish untouched d009 evidence first, then implement the director's minimal three-file correction on a new branch. Review reports are preserved under session/history; raw artifacts and correction commits are pending, so MODULE-003 remains unaccepted. Codex has not implemented or executed Drive Tool tests.
 
+## 2026-10-14 — Exact worker correction published for final gates
+
+d010 (zero relay repairs) completed in Sarvam's sandbox with reported 89-test suites and meaningful base/mutation failures. Worker still reported GitHub write connector unavailable; Codex retrieved the normal downloadable artifacts, checked safe archive paths, inspected source/raw logs, and matched every implementation/evidence Git blob to worker hashes. Transported unchanged source to feature/module-003-resource-fixes at 80bf54885877c475d2ac59ddb3e9f96384600b9e; unchanged raw d009/d010 artifacts to drop 4c2e5b39c616ef5fc96d6d05a77f4506aa49a350. No Drive Tool implementation or test execution by Codex. d011 fresh Gemini review dispatched; d012 fresh independent execution prepared. Acceptance, integration and cloud-box validation remain pending.
+
 Append dated milestones. Preserve previous entries and distinguish evidence levels.
 
 ## 2026-10-06 — Browser connection established

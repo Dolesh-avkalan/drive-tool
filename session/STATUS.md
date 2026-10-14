@@ -32,4 +32,10 @@ d009 completed with zero relay repair calls. Fresh worker reports both Python ve
 
 ## Next
 
+### d010 delivered and transported; final gates running
+
+Sarvam implemented and reports 89 tests passing on Python 3.11/3.12, five new regressions failing on the base, two mutations caught, and the d009 ownership check passing after the fix. It still reported GitHub write tools unavailable. Director downloaded both artifact bundles through the browser's normal file-download UI, inspected raw logs and source diff, and verified all three published blobs match worker hashes exactly. No implementation edits or Drive Tool test execution by Codex.
+
+Published source/tests commit `e741eab` and evidence head `80bf54885877c475d2ac59ddb3e9f96384600b9e`, branch `feature/module-003-resource-fixes`, based on c2b324d. Only local.py, test_local.py and the new evidence file changed. Raw d009/d010 source/checks/logs were transported unchanged to drop commit `4c2e5b39c616ef5fc96d6d05a77f4506aa49a350`, under drive-tool/module-003/. Gemini d011 fresh independent review is dispatched with the complete pinned candidate inline; d012 fresh Sarvam execution brief is prepared for dispatch after d011. MODULE-003 remains unaccepted until the final gates return.
+
 Collect d008; dispatch and collect d009; compare actual artifacts with reports; delegate minimal corrections for confirmed blockers. Then prepare an isolated integration candidate and owner merge recommendation. No implementation merge/deployment without owner approval. Google Drive credentials and cloud-box testing remain later milestones.

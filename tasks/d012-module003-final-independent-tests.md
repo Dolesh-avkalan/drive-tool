@@ -1,0 +1,13 @@
+# d012 — fresh independent execution of the d010 candidate
+
+Worker: browser Sarvam, fresh context, execution/review only. Director: Codex. Do not implement, modify or push Drive Tool branches, merge, deploy, install packages or access user storage/credentials.
+
+Exact candidate Dolesh-avkalan/drive-tool 80bf54885877c475d2ac59ddb3e9f96384600b9e (feature/module-003-resource-fixes). Base c2b324dab4cf720178a36a58b5f1cf1339730151. Tested source blob identities local.py 5da22dd42d27746b9840ed00495568ea468754a3 and test_local.py b3319752edaf92a02993981fcc62d63f63ebb408. Only these two files and docs/evidence/MODULE-003-RESOURCE-FIXES.md differ from base. Verify that yourself.
+
+Fetch exact source and original MODULE-003 brief from main. Run full unittest discovery on actual Python 3.11/3.12 if available, recording HEAD, hashes, kernel/filesystem, stdout/stderr, exits, counts and skips; unavailable versions must be explicit. Prior implementer reports 89 passing tests; independently establish the outcome, do not just repeat it.
+
+Create at least one fresh ownership check outside the checkout. Exercise parent close failure after child read/scan acquisition on shallow/deep paths, real close then injected error, multiple close failures, and a primary read/scan failure combined with close errors. Track acquisition lifetimes rather than fd integers; assert every acquired child closed once, no parent double-close/retry, correct error/cause and root remains owned/usable. Demonstrate the child handoff check fails on c2b324d and passes on candidate. Model ambiguous close uncertainty honestly.
+
+Verify probe/runtime flags are coupled and platform-denial tests execute when static facilities exist but runtime probe is false. Operational tests may explicitly skip on a correctly rejected unsupported kernel. Re-run real read/stat/list/root symlink-swap containment, root rename anchoring, bounded growth/read, FIFO timeout and repeated descriptor counts with tiny synthetic fixtures. Use existing d009 scripts only as secondary cross-check; primary new check must have fresh provenance.
+
+Publish report, check scripts and raw logs only to Dolesh-avkalan/drop under drive-tool/module-003/d012-independent-tests plus d012-sarvam-independent-tests.md if GitHub write tools are actually available. Do not assume owner's recent connector connection bound to this chat; check capabilities without asking for or exposing secrets. If PUSH_BLOCKED, return complete downloadable zip with files/manifest/hashes and a final report artifact, all through the normal file-artifact UI. Do not fabricate push or runs. Conformant cloud-kernel tests and integrated MODULE-002 tests are later gates.
