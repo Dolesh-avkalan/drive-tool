@@ -98,3 +98,7 @@ D014 cloud-runner preparation dispatched to Sarvam in existing d012/d013 chat 01
 
 ---
 
+
+## 2026-10-15 — GitHub connection recheck requested by owner
+
+D014 completed: worker reports runner sandbox PASS with 140 tests and six real-kernel checks on each Python 3.11/3.12, plus five fail-closed negative tests; Python 3.14 unavailable in sandbox, actual cloud execution still pending. Captured output outputs/d014-sarvam-result.json; downloadable d014-cloud-validation-bundle.zip not yet retrieved/inspected. Worker again reported PUSH_BLOCKED. Owner explicitly states Sarvam now has GitHub. Dispatched d015 to recheck current connector capabilities and publish exact d014 artifacts directly to drop if available, preserving d013. Do not infer earlier unavailable tools still apply. Active relay process 28704; guest result /home/ubuntu/d015-sarvam-result.json. No cloud test execution or reboot yet.
