@@ -6,9 +6,10 @@ These files record this project's continuity. Verify live repository heads and h
 ## Owner's working agreement
 - Codex is the director. Codex owns plans, architecture, specifications, acceptance criteria, verification, and integration decisions.
 - Delegate implementation and test execution to browser chatbots. Do not silently become the implementer or test runner.
-- API Sarvam is the browser messenger; logged-in browser Sarvam is the initial implementer.
-- Keep modules small. The owner authorizes a two-module batch: easy MODULE-002 on the existing Sarvam thread and harder MODULE-003 on Gemini 3.1 Pro in a separate tab. Keep outputs and branches isolated.
-- Stabilize on the VPS before deploying a tagged stable version to the PC.
+- Use the local scripted browser relay. Gemini model `4 argon` handles complex implementation/review; logged-in browser Sarvam handles implementation, assembly and test execution. Routine work does not require the API-agent messenger; use it only for authorized repair when necessary.
+- Keep modules small and outputs/branches isolated. Use useful existing implementation conversations for follow-ups and fresh contexts for independent review/execution. Read the current STATUS.md before dispatching; do not repeat a live task. Historical MODULE-002/003 concurrent batch and Gemini 3.1 Pro instructions are superseded by the 2026-10-14 owner steering.
+- Design for stable, light, modular, predictable behavior: bounded operations, explicit ownership/errors, minimal dependencies and no speculative frameworks. Codex owns that design; workers perform the labor.
+- Establish confidence through worker artifacts, independent review and integrated synthetic tests before the owner's later cloud-box test. Do not assume the old browser VPS is the test target or deploy to it. The browser workload now runs locally; preserve the existing VPS until separately authorized.
 - Persist progress, decisions, blockers, evidence, and next steps in session/ after every meaningful milestone and before ending a work session.
 
 ## Evidence and changes
