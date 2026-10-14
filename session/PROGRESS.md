@@ -86,3 +86,15 @@ Owner asked whether Sarvam can send files directly to Gemini and authorized a te
 
 ## 2026-10-06 — Sarvam-to-Gemini file upload verified
 API Sarvam created fresh Gemini tab 3. Browser event 301/308 explicitly shows Selected 3.1 Pro Advanced reasoning. Event 324 shows actual file chooser; browser_file_upload event 327 used the prepared absolute path. Event 328 returned ok=true with attachment chip MODULE-003-bundle and visible 'File uploaded'. This directly verifies the requested file transfer capability. Event 331 begins attached-file task submission; reading confirmation and final source are pending at this checkpoint. Existing module, Sarvam and greeting tabs were preserved. No module push/merge/deployment claim for MODULE-003.
+# Latest checkpoint — 2026-10-15 (Asia/Calcutta)
+
+This block supersedes pending-task statements below; older text is historical.
+
+Verified all 21 d013 manifest entries and preserved accepted module blob identities. Transported exactly five Sarvam files unchanged into feature/readonly-core-candidate, published 99e102522da4f0eeee465fe231ad62f0cc4ecad8. Raw bundle is pinned at drop 97d42523190a16c177fc8bdee7e522723e792126 under drive-tool/readonly-core/d013-integration/. Delegated sandbox logs record 140 tests on each Python 3.11/3.12, zero skips. Codex did not implement or execute tests. No implementation merge or deployment. Whole-directory enumeration remains unbounded; Google Drive/write/API/jobs remain later work.
+
+Owner completed SSH-key setup privately. Actual prompt confirms dolesh_avkalan@directortemp (GCP europe-west2-b, 34.89.54.103). Read-only preflight: Ubuntu 26.04.1, kernel 7.0.0-1011-gcp, Python 3.14.4, root 726 MiB free, /tmp tmpfs 3.9 GiB free, RAM 5615 MiB available; bh-brave/bh-mcp/bh-hostd active, local API health ok. Ubuntu restart-required notice does not block the connection. No reboot/update performed.
+
+D014 cloud-runner preparation dispatched to Sarvam in existing d012/d013 chat 01M4XRXH904WVQCNMMPWDHNSVV through local relay, process session 32022, expected guest result /home/ubuntu/d014-sarvam-result.json. Check process/result before redispatch. Brief: tasks/d014-cloud-runner.md. Worker prepares and sandbox-tests bounded runner; director transports/orchestrates. Actual cloud Drive Tool execution remains pending. <=50 MiB synthetic workspace, no install/service changes/private paths/reboot/deployment. Collect and review files/commands before target run and applicable browser action-time approval. Preserve cloud browser services. Python 3.14 is a new target compatibility gate.
+
+---
+
