@@ -4,6 +4,10 @@
 
 Owner explicitly resumed Drive Tool and reinforced director/worker separation, simplicity and stability. Local persistent Ubuntu browser VM uses 4 GiB RAM and E-drive storage, with authenticated Gemini/Sarvam verified after restart. Fetched correction branch at c2b324dab4cf720178a36a58b5f1cf1339730151; four changed paths and d007 evidence exist. New d008 Gemini independent review was dispatched with exact source/tests inline; d009 Sarvam execution brief is prepared. Director identified child-descriptor ownership after parent-close failure as an inspection concern, not an executed finding. No implementation edits, test execution, merge or deployment by the director. Cloud-box integration remains later.
 
+## 2026-10-14 — Independent gates returned; correction dispatched
+
+Gemini d008 (4 argon, high, zero repairs) returned CHANGES REQUIRED for child resource handoff and probe/test-gate issues. Fresh Sarvam d009 (zero repairs) reports both interpreter suites passing but independently reproduces the child-descriptor leak, plus real old-fail/new-pass containment. Worker lacked GitHub write capability and returned PUSH_BLOCKED; owner then connected GitHub. Follow-up d010 asks that worker to publish untouched d009 evidence first, then implement the director's minimal three-file correction on a new branch. Review reports are preserved under session/history; raw artifacts and correction commits are pending, so MODULE-003 remains unaccepted. Codex has not implemented or executed Drive Tool tests.
+
 Append dated milestones. Preserve previous entries and distinguish evidence levels.
 
 ## 2026-10-06 — Browser connection established
