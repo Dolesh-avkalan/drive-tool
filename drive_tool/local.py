@@ -373,6 +373,22 @@ class LocalAdapter:
                 raise ValueError("filesystem '/' is not a directory")
 
             for part in parts:
+                # Explicit no-follow guard: reject a symlink component before
+                # opening it. Some platforms (e.g. gVisor/9p) do not enforce
+                # O_NOFOLLOW together with O_DIRECTORY, so the open below could
+                # otherwise follow the link. On conformant kernels this is a
+                # redundant, additive check on top of O_NOFOLLOW.
+                try:
+                    pre_st = self._os_stat_nofollow(part, dir_fd=current_fd)
+                except OSError as exc:
+                    raise self._classify_root_error(
+                        part, current_fd, exc, raw_root
+                    ) from exc
+                if stat.S_ISLNK(pre_st.st_mode):
+                    raise UnsafePathError(
+                        f"symlink rejected at component {part!r} in root "
+                        f"{raw_root!r}"
+                    )
                 try:
                     next_fd = self._os_open(part, dir_flags, dir_fd=current_fd)
                 except OSError as exc:
@@ -560,6 +576,24 @@ class LocalAdapter:
         current_fd = root_fd
         try:
             for part in dir_parts:
+                # Explicit no-follow guard (see _open_anchored_root): reject a
+                # symlink component before opening it, so intermediate traversal
+                # cannot follow a link even where O_NOFOLLOW is not enforced.
+                try:
+                    pre_st = self._os_stat_nofollow(part, dir_fd=current_fd)
+                except OSError as exc:
+                    raise self._classify_component_open_error(
+                        part,
+                        current_fd,
+                        exc,
+                        file_id,
+                        is_intermediate=True,
+                        for_directory_op= True,
+                    ) from exc
+                if stat.S_ISLNK(pre_st.st_mode):
+                    raise UnsafePathError(
+                        f"symlink encountered at {part!r} for {file_id!r}"
+                    )
                 try:
                     next_fd = self._os_open(part, dir_flags, dir_fd=current_fd)
                 except OSError as exc:
@@ -680,6 +714,28 @@ class LocalAdapter:
             )
             try:
                 target_name = parts[-1]
+                # Explicit no-follow guard (see _open_anchored_root): reject a
+                # symlink target before opening it, so listing a symlinked
+                # directory cannot escape the root even where O_NOFOLLOW is
+                # not enforced together with O_DIRECTORY.
+                try:
+                    pre_st = self._os_stat_nofollow(
+                        target_name, dir_fd=parent_fd
+                    )
+                except OSError as exc:
+                    raise self._classify_component_open_error(
+                        target_name,
+                        parent_fd,
+                        exc,
+                        parent.file_id,
+                        is_intermediate=False,
+                        for_directory_op=True,
+                    ) from exc
+                if stat.S_ISLNK(pre_st.st_mode):
+                    raise UnsafePathError(
+                        f"symlink encountered at {target_name!r} for "
+                        f"{parent.file_id!r}"
+                    )
                 try:
                     scan_fd = self._os_open(
                         target_name, dir_flags, dir_fd=parent_fd
@@ -722,48 +778,54 @@ class LocalAdapter:
                 ) from exc
             raise
 
-        # Note: once os.scandir(scan_fd) succeeds, exiting the context manager
-        # calls closedir() in C, which closes scan_fd automatically.
+        # os.scandir(scan_fd) DUPLICATES the descriptor: CPython performs an
+        # internal _Py_dup() before calling fdopendir(), so the iterator's
+        # context manager closes the duplicate and NOT our scan_fd. Close
+        # scan_fd explicitly (in a finally, so a failed listing cannot leak).
         children: list[FileMetadata] = []
-        with scandir_it as entries:
-            for entry in entries:
-                name = entry.name
-                if (
-                    name in ("", ".", "..")
-                    or "/" in name
-                    or "\\" in name
-                    or "\x00" in name
-                ):
-                    continue
-                try:
-                    st = entry.stat(follow_symlinks=False)
-                except FileNotFoundError:
-                    # An entry disappearing concurrently during listing is skipped.
-                    continue
-                except OSError as exc:
-                    if exc.errno == errno.ENOENT:
+        try:
+            with scandir_it as entries:
+                for entry in entries:
+                    name = entry.name
+                    if (
+                        name in ("", ".", "..")
+                        or "/" in name
+                        or "\\" in name
+                        or "\x00" in name
+                    ):
                         continue
-                    raise LocalStorageError(
-                        f"failed to inspect child {name!r} in {parent.file_id!r}: {exc}"
-                    ) from exc
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                    except FileNotFoundError:
+                        # An entry disappearing concurrently during listing is skipped.
+                        continue
+                    except OSError as exc:
+                        if exc.errno == errno.ENOENT:
+                            continue
+                        raise LocalStorageError(
+                            f"failed to inspect child {name!r} in "
+                            f"{parent.file_id!r}: {exc}"
+                        ) from exc
 
-                if stat.S_ISLNK(st.st_mode):
-                    continue
-                if stat.S_ISDIR(st.st_mode):
-                    children.append(
-                        self._build_metadata(
-                            (*parts, name), kind="directory", size_bytes=None
+                    if stat.S_ISLNK(st.st_mode):
+                        continue
+                    if stat.S_ISDIR(st.st_mode):
+                        children.append(
+                            self._build_metadata(
+                                (*parts, name), kind="directory", size_bytes=None
+                            )
                         )
-                    )
-                elif stat.S_ISREG(st.st_mode):
-                    children.append(
-                        self._build_metadata(
-                            (*parts, name),
-                            kind="file",
-                            size_bytes=st.st_size,
+                    elif stat.S_ISREG(st.st_mode):
+                        children.append(
+                            self._build_metadata(
+                                (*parts, name),
+                                kind="file",
+                                size_bytes=st.st_size,
+                            )
                         )
-                    )
-                # Special entries (FIFOs, sockets, device nodes) are omitted.
+                    # Special entries (FIFOs, sockets, device nodes) are omitted.
+        finally:
+            self._os_close(scan_fd)
 
         children.sort(key=lambda meta: meta.name)
         return children
