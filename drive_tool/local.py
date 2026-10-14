@@ -140,12 +140,10 @@ def _no_follow_semantics_available() -> bool:
         except OSError:
             return False
 
-        flags = (
-            os.O_RDONLY
-            | os.O_NOFOLLOW
-            | os.O_NONBLOCK
-            | getattr(os, "O_CLOEXEC", 0)
-        )
+        # Use the production directory-component flag helper itself, so the
+        # probe can never drift from real adapter behaviour: the helper is the
+        # single source of truth, resolved at call time (never cached).
+        flags = _dir_open_flags()
         try:
             fd = os.open(link, flags)
         except OSError as exc:
@@ -493,6 +491,32 @@ class LocalAdapter:
             self._os_close(fd)
         except OSError:
             pass
+
+    def _release_owned(self, owned: list[tuple[int, str]]) -> None:
+        """Release each owned descriptor exactly once, in the given order.
+
+        A descriptor is "owned" the moment it is acquired, and is closed exactly
+        once here. A failing ``close`` is never retried: Linux releases the
+        descriptor even when ``close`` reports an error, and a truly ambiguous
+        close cannot be verified from user space, so it must not be retried.
+        While another exception is already propagating, close failures are
+        suppressed so the primary storage error is never masked; on the success
+        path the first close failure is raised as :class:`LocalStorageError`
+        with its ``OSError`` cause preserved.
+        """
+        primary = sys.exc_info()[0]
+        first_failure: tuple[str, OSError] | None = None
+        for fd, context in owned:
+            try:
+                self._os_close(fd)
+            except OSError as exc:
+                if first_failure is None:
+                    first_failure = (context, exc)
+        if first_failure is not None and primary is None:
+            context, exc = first_failure
+            raise LocalStorageError(
+                f"failed to close descriptor for {context}: {exc}"
+            ) from exc
 
     # -- root initialization ---------------------------------------------------
 
@@ -846,18 +870,27 @@ class LocalAdapter:
         parts = _parse_file_id(parent.file_id)
         dir_flags = _dir_open_flags()
 
-        if not parts:
-            try:
-                scan_fd = self._os_open(".", dir_flags, dir_fd=root_fd)
-            except OSError as exc:
-                raise LocalStorageError(
-                    f"failed to open root directory for listing: {exc}"
-                ) from exc
-        else:
-            parent_fd = self._traverse_parent_dir(
-                root_fd, parts[:-1], parent.file_id
-            )
-            try:
+        # A descriptor is owned the moment it is acquired. ``owned`` is released
+        # exactly once by the single ``finally`` at the end of this method, which
+        # covers the parent-close handoff as well as the scan, so a failing
+        # parent close cannot skip the child's cleanup scope.
+        owned: list[tuple[int, str]] = []
+        try:
+            if not parts:
+                try:
+                    scan_fd = self._os_open(".", dir_flags, dir_fd=root_fd)
+                except OSError as exc:
+                    raise LocalStorageError(
+                        f"failed to open root directory for listing: {exc}"
+                    ) from exc
+            else:
+                parent_fd = self._traverse_parent_dir(
+                    root_fd, parts[:-1], parent.file_id
+                )
+                if parent_fd != root_fd:
+                    owned.append(
+                        (parent_fd, f"parent directory of {parent.file_id!r}")
+                    )
                 target_name = parts[-1]
                 try:
                     scan_fd = self._os_open(
@@ -872,13 +905,10 @@ class LocalAdapter:
                         is_intermediate=False,
                         for_directory_op=True,
                     ) from exc
-            finally:
-                if parent_fd != root_fd:
-                    self._close_traversal_fd(
-                        parent_fd, context=f"parent directory of {parent.file_id!r}"
-                    )
 
-        try:
+            # Child scan descriptor acquired: owned immediately.
+            owned.append((scan_fd, f"scan descriptor for {parent.file_id!r}"))
+
             try:
                 dir_st = self._os_fstat(scan_fd)
             except OSError as exc:
@@ -958,9 +988,7 @@ class LocalAdapter:
                 f"failed to iterate directory {parent.file_id!r}: {exc}"
             ) from exc
         finally:
-            self._close_traversal_fd(
-                scan_fd, context=f"scan descriptor for {parent.file_id!r}"
-            )
+            self._release_owned(owned)
 
         children.sort(key=lambda meta: meta.name)
         return children
@@ -974,6 +1002,13 @@ class LocalAdapter:
             raise IsDirectoryError(f"{ROOT_ID!r} is a directory, not a file")
 
         parent_fd = self._traverse_parent_dir(root_fd, parts[:-1], ref.file_id)
+        # A descriptor is owned the moment it is acquired. Once the child file
+        # descriptor is opened it is released exactly once by the single
+        # ``finally`` below, which also covers the parent-close handoff, so a
+        # failing parent close cannot skip the child's cleanup scope.
+        owned: list[tuple[int, str]] = []
+        if parent_fd != root_fd:
+            owned.append((parent_fd, f"parent directory of {ref.file_id!r}"))
         try:
             target_name = parts[-1]
             try:
@@ -989,18 +1024,10 @@ class LocalAdapter:
                     is_intermediate=False,
                     for_directory_op=False,
                 ) from exc
-        finally:
-            if parent_fd != root_fd:
-                self._close_traversal_fd(
-                    parent_fd, context=f"parent directory of {ref.file_id!r}"
-                )
-
-        try:
+            owned.append((file_fd, f"file descriptor for {ref.file_id!r}"))
             return self._read_open_file_bounded(file_fd, ref.file_id)
         finally:
-            self._close_traversal_fd(
-                file_fd, context=f"file descriptor for {ref.file_id!r}"
-            )
+            self._release_owned(owned)
 
     def _read_open_file_bounded(self, file_fd: int, file_id: str) -> bytes:
         """Verify ``file_fd`` is a regular file and read up to ``max_read_bytes``."""
