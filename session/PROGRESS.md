@@ -16,6 +16,10 @@ d010 (zero relay repairs) completed in Sarvam's sandbox with reported 89-test su
 
 Gemini d011 accepted exact 80bf548 candidate after static review (4 argon/high, zero repairs, TESTS_NOT_RUN). d012 is now executing in fresh Sarvam context. Prepared d013 isolated read-only core assembly with exact MODULE-002/MODULE-003 pins and cross-module tests. Owner tentatively prefers an existing cloud box; connection method remains unresolved until the synthetic candidate is ready. No implementation merge or cloud deployment.
 
+## 2026-10-14 — MODULE-003 scoped acceptance; integration dispatched
+
+d012 independently confirms 89-test suites on both interpreters, 11 fresh ownership checks, meaningful old-code/mutation failures and 15 operational checks. Director retrieved raw artifacts, verified 39 manifest hashes/sizes and inspected the real and simulated logs. Accepted exact 80bf548 for MODULE-003's read-only contract, with documented kernel/threat boundaries. Transported d012 artifacts unchanged to drop 3421b27288878e6a3e7ba209bc28961c994787c1. Dispatched d013 combined assembly/tests with source preservation. Owner uses SSH through a web console for the later existing-box test; an authenticated terminal was requested. Existing VPS API health is live, periodic disk report shows 726 MiB; no cloud test/deployment or implementation merge occurred.
+
 Append dated milestones. Preserve previous entries and distinguish evidence levels.
 
 ## 2026-10-06 — Browser connection established

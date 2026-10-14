@@ -32,6 +32,12 @@ d009 completed with zero relay repair calls. Fresh worker reports both Python ve
 
 ## Next
 
+### MODULE-003 accepted for the scoped read-only contract
+
+Director accepts exact `80bf54885877c475d2ac59ddb3e9f96384600b9e` after d011 static ACCEPT and d012 fresh execution evidence. Director downloaded d012's normal artifact zip, verified all 39 manifest file sizes/SHA-256 hashes, and inspected raw suite, ownership, probe and real d009 fd logs. Both Python versions ran 89 committed tests, zero skips, OK. Fresh ownership check passes 11/11 on candidate and fails nine cases on base; probe/mutation checks detect decoupling; operational checks pass 15/15. Under artificially forced-false runtime probing, the raw-kernel agreement test correctly fails against a kernel that actually enforces no-follow; this simulation is separate from the all-passing real run, and platform-denial tests are not skipped. Ambiguous close does not imply proven physical release and is not retried. Raw d012 artifacts are pinned at drop `3421b27288878e6a3e7ba209bc28961c994787c1`.
+
+d013 combined core assembly/testing was dispatched to Sarvam, continuing d012's useful context. It must preserve exact MODULE-002/MODULE-003 source, add integration-only tests/evidence, and return a separate feature/readonly-core-candidate without merging main. Cloud target-kernel validation remains pending. Owner says the existing box is accessed by SSH via a web console; an authenticated console terminal in the Codex side-browser has been requested. Current PC has no user SSH config/agent and no Desktop Commander remote devices are registered. Known old VPS API health responds, and its periodic status reports 726 MiB free disk; direct live resource preflight remains required. d014 is a prepared bounded synthetic test plan, not a cloud deployment.
+
 ### d010 delivered and transported; final gates running
 
 Sarvam implemented and reports 89 tests passing on Python 3.11/3.12, five new regressions failing on the base, two mutations caught, and the d009 ownership check passing after the fix. It still reported GitHub write tools unavailable. Director downloaded both artifact bundles through the browser's normal file-download UI, inspected raw logs and source diff, and verified all three published blobs match worker hashes exactly. No implementation edits or Drive Tool test execution by Codex.
