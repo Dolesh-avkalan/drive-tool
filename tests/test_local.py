@@ -6,6 +6,7 @@ import errno
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,8 @@ from drive_tool.local import (
     UnsafePathError,
     UnsupportedEntryError,
     UnsupportedPlatformError,
+    _dir_open_flags,
+    _no_follow_semantics_available,
 )
 from drive_tool.storage import (
     ROOT_ID,
@@ -36,16 +39,21 @@ from drive_tool.storage import (
 )
 
 def _is_supported_posix() -> bool:
-    """Return True when the current platform supports LocalAdapter."""
+    """Return True when the current platform supports LocalAdapter.
+
+    Beyond the static constants/dir_fd checks this also runs the same runtime
+    probe the adapter uses, so a platform that defines ``O_NOFOLLOW`` but does
+    not enforce it is treated as unsupported rather than silently passing.
+    """
     return (
         os.name == "posix"
         and hasattr(os, "O_NOFOLLOW")
-        and hasattr(os, "O_DIRECTORY")
         and hasattr(os, "O_NONBLOCK")
         and os.open in getattr(os, "supports_dir_fd", set())
         and os.stat in getattr(os, "supports_dir_fd", set())
         and os.stat in getattr(os, "supports_follow_symlinks", set())
         and os.scandir in getattr(os, "supports_fd", set())
+        and _no_follow_semantics_available()
     )
 
 class _PosixTempRootTestCase(unittest.TestCase):
@@ -106,6 +114,56 @@ class TestPlatformCapabilityGate(unittest.TestCase):
         with mock.patch("drive_tool.local.os.supports_fd", set()):
             with self.assertRaises(UnsupportedPlatformError):
                 LocalAdapter("local-src", "/tmp")
+
+class TestPlatformNoFollowSemantics(_PosixTempRootTestCase):
+    """Real-kernel checks that O_NOFOLLOW (without O_DIRECTORY) is enforced.
+
+    These assert against the actual kernel rather than a simulated result: the
+    adapter's chosen strategy relies on ``O_NOFOLLOW`` alone being honoured.
+    """
+
+    def test_dir_open_flags_exclude_o_directory(self) -> None:
+        flags = _dir_open_flags()
+        self.assertTrue(flags & os.O_NOFOLLOW)
+        self.assertTrue(flags & os.O_NONBLOCK)
+        self.assertFalse(
+            flags & getattr(os, "O_DIRECTORY", 0),
+            "directory-component opens must not use O_DIRECTORY",
+        )
+
+    def test_real_kernel_rejects_symlink_with_component_flags(self) -> None:
+        (self.outside_dir / "inside").mkdir()
+        link = self.root_dir / "linkdir"
+        os.symlink(self.outside_dir, link)
+
+        flags = _dir_open_flags()
+        with self.assertRaises(OSError) as cm:
+            fd = os.open(str(link), flags)
+            os.close(fd)
+        self.assertIn(
+            cm.exception.errno,
+            (errno.ELOOP, getattr(errno, "EMLINK", -1)),
+            msg="O_NOFOLLOW alone must reject a symlink component on this kernel",
+        )
+
+    def test_real_kernel_opens_real_directory_and_fstat_is_dir(self) -> None:
+        flags = _dir_open_flags()
+        fd = os.open(str(self.root_dir), flags)
+        try:
+            self.assertTrue(stat.S_ISDIR(os.fstat(fd).st_mode))
+        finally:
+            os.close(fd)
+
+    def test_runtime_probe_reports_nofollow_enforced(self) -> None:
+        self.assertTrue(_no_follow_semantics_available())
+
+    def test_unsupported_platform_when_runtime_probe_fails(self) -> None:
+        with mock.patch(
+            "drive_tool.local._no_follow_semantics_available",
+            return_value=False,
+        ):
+            with self.assertRaises(UnsupportedPlatformError):
+                LocalAdapter("src", self.root_dir)
 
 class TestConfigurationAndRootValidation(_PosixTempRootTestCase):
     """Tests for constructor argument validation and no-follow root setup."""
@@ -635,6 +693,122 @@ class TestContainmentSymlinksAndAnchoredRoot(_PosixTempRootTestCase):
                 data = adapter.read_bytes(FileRef("src", "p/sub/target.txt"))
                 self.assertEqual(data, b"SAFE_PAYLOAD_2")
 
+    # -- directory swapped for an outside symlink immediately before its open --
+    #
+    # These are deterministic mechanism proofs of the atomic-open strategy: the
+    # hook fires inside the _os_open call for the component, i.e. after any
+    # check and immediately before the kernel open. On the chosen strategy the
+    # kernel rejects the swapped symlink atomically with ELOOP, so no outside
+    # data, metadata or listing is ever exposed. They assert outcomes (and fail
+    # if the operation returns outside content) rather than printing.
+
+    SENTINEL_BYTES = b"OUTSIDE_SENTINEL_BYTES_0123456789"
+
+    def _reset_fixture(self) -> None:
+        shutil.rmtree(self.root_dir, ignore_errors=True)
+        shutil.rmtree(self.outside_dir, ignore_errors=True)
+        self.root_dir.mkdir()
+        self.outside_dir.mkdir()
+
+    def _assert_contained(self, operation) -> None:
+        """Assert ``operation`` raises UnsafePathError and exposes nothing."""
+        try:
+            result = operation()
+        except UnsafePathError:
+            return
+        except Exception as exc:  # noqa: BLE001
+            self.fail(
+                f"expected UnsafePathError, got {type(exc).__name__}: {exc}"
+            )
+        self.fail(
+            f"expected UnsafePathError, but the operation returned {result!r} "
+            "(outside data exposed)"
+        )
+
+    def _make_swap_hook(self, adapter, real_sub, outside):
+        """Return an _os_open hook that swaps ``real_sub`` for a symlink."""
+        orig_open = adapter._os_open
+        state = {"done": False}
+
+        def hook(path: str, flags: int, *, dir_fd: int | None = None) -> int:
+            if path == "sub" and not state["done"]:
+                state["done"] = True
+                os.rename(real_sub, str(real_sub) + "__moved")
+                os.symlink(outside, real_sub)
+            return orig_open(path, flags, dir_fd=dir_fd)
+
+        return hook
+
+    def _build_sub_fixture(self):
+        self._reset_fixture()
+        sub = self.root_dir / "sub"
+        sub.mkdir()
+        (sub / "target.txt").write_bytes(b"SAFE_INSIDE")
+        (self.outside_dir / "target.txt").write_bytes(self.SENTINEL_BYTES)
+        (self.outside_dir / "secret.txt").write_bytes(b"OUTSIDE_SECRET_ONLY")
+        return sub
+
+    def test_dir_swap_before_component_open_read_traversal_rejected(self) -> None:
+        sub = self._build_sub_fixture()
+        adapter = LocalAdapter("src", self.root_dir)
+        try:
+            hook = self._make_swap_hook(adapter, sub, self.outside_dir)
+            with mock.patch.object(adapter, "_os_open", side_effect=hook):
+                self._assert_contained(
+                    lambda: adapter.read_bytes(
+                        FileRef("src", "p/sub/target.txt")
+                    )
+                )
+        finally:
+            adapter.close()
+
+    def test_dir_swap_before_component_open_stat_traversal_rejected(self) -> None:
+        sub = self._build_sub_fixture()
+        adapter = LocalAdapter("src", self.root_dir)
+        try:
+            hook = self._make_swap_hook(adapter, sub, self.outside_dir)
+            with mock.patch.object(adapter, "_os_open", side_effect=hook):
+                self._assert_contained(
+                    lambda: adapter.stat(FileRef("src", "p/sub/target.txt"))
+                )
+        finally:
+            adapter.close()
+
+    def test_dir_swap_before_list_children_final_open_rejected(self) -> None:
+        sub = self._build_sub_fixture()
+        adapter = LocalAdapter("src", self.root_dir)
+        try:
+            hook = self._make_swap_hook(adapter, sub, self.outside_dir)
+            with mock.patch.object(adapter, "_os_open", side_effect=hook):
+                self._assert_contained(
+                    lambda: adapter.list_children(FileRef("src", "p/sub"))
+                )
+        finally:
+            adapter.close()
+
+    def test_dir_swap_before_ancestor_open_rejected_at_root_setup(self) -> None:
+        self._reset_fixture()
+        anc = self.base_dir / "anc"
+        anc.mkdir()
+        inner = anc / "inner"
+        inner.mkdir()
+        outside_target = self.outside_dir / "anc_target"
+        outside_target.mkdir()
+        (outside_target / "leak.txt").write_bytes(self.SENTINEL_BYTES)
+
+        state = {"done": False}
+
+        def hook(self_, path: str, flags: int, *, dir_fd: int | None = None) -> int:
+            if path == "anc" and not state["done"]:
+                state["done"] = True
+                os.rename(anc, self.base_dir / "anc__moved")
+                os.symlink(outside_target, anc)
+            return os.open(path, flags, dir_fd=dir_fd)
+
+        with mock.patch.object(LocalAdapter, "_os_open", hook):
+            with self.assertRaises(UnsafePathError):
+                LocalAdapter("src", inner)
+
 class TestBoundedReads(_PosixTempRootTestCase):
     """Tests for max_read_bytes threshold enforcement and concurrent file growth."""
 
@@ -824,15 +998,28 @@ class TestDescriptorLifetimeAndClose(_PosixTempRootTestCase):
         (sub / "big.txt").write_bytes(b"x" * 100)
         os.symlink(self.outside_dir, sub / "sym")
 
-        active_fds: set[int] = set()
+        active_fds: set = set()
         orig_open = os.open
         orig_close = os.close
         orig_scandir = os.scandir
 
         class _TrackedScandirWrapper:
+            """Wrap os.scandir(fd) while modelling its internal dup.
+
+            ``os.scandir(fd)`` duplicates ``fd`` internally (CPython _Py_dup
+            before fdopendir); its context manager closes the *duplicate* and
+            leaves the caller's ``fd`` open. We therefore track the duplicate
+            as a distinct token, and only the duplicate is retired on
+            ``__exit__``. The caller's ``fd`` stays in ``active_fds`` until
+            ``LocalAdapter`` explicitly closes it via ``_os_close`` - so this
+            test fails if that explicit close is removed.
+            """
+
             def __init__(self, fd: int) -> None:
                 self._fd = fd
                 self._inner = orig_scandir(fd)
+                self._dup_token = ("scandir_dup", fd)
+                active_fds.add(self._dup_token)
 
             def __enter__(self):
                 return self._inner.__enter__()
@@ -841,7 +1028,8 @@ class TestDescriptorLifetimeAndClose(_PosixTempRootTestCase):
                 try:
                     return self._inner.__exit__(exc_type, exc_val, exc_tb)
                 finally:
-                    active_fds.discard(self._fd)
+                    # scandir closes its own duplicate, NOT the passed fd.
+                    active_fds.discard(self._dup_token)
 
         def tracked_open(
             path: str, flags: int, *, dir_fd: int | None = None
@@ -921,6 +1109,254 @@ class TestDescriptorLifetimeAndClose(_PosixTempRootTestCase):
             adapter.close()
 
         self.assertEqual(len(os.listdir(proc_fd)), baseline_fds)
+
+    def test_list_children_closes_the_scan_descriptor(self) -> None:
+        """The explicit scan_fd close must actually be issued.
+
+        scandir dups the descriptor internally, so asserting on the raw scandir
+        close is not enough; this spies the adapter's own seam and requires the
+        descriptor it opened for scandir to be closed.
+        """
+        (self.root_dir / "one.txt").write_bytes(b"1")
+        with LocalAdapter("src", self.root_dir) as adapter:
+            opened: list[int] = []
+            closed: list[int] = []
+            scan_fds: list[int] = []
+            real_open = adapter._os_open
+            real_close = adapter._os_close
+            real_scandir = adapter._os_scandir
+
+            def spy_open(path, flags, *, dir_fd=None):
+                fd = real_open(path, flags, dir_fd=dir_fd)
+                opened.append(fd)
+                return fd
+
+            def spy_close(fd):
+                closed.append(fd)
+                return real_close(fd)
+
+            def spy_scandir(fd):
+                scan_fds.append(fd)
+                return real_scandir(fd)
+
+            with (
+                mock.patch.object(adapter, "_os_open", side_effect=spy_open),
+                mock.patch.object(adapter, "_os_close", side_effect=spy_close),
+                mock.patch.object(
+                    adapter, "_os_scandir", side_effect=spy_scandir
+                ),
+            ):
+                adapter.list_children(FileRef("src", ROOT_ID))
+
+            self.assertTrue(scan_fds, "list_children must open a scan descriptor")
+            for scan_fd in scan_fds:
+                self.assertIn(
+                    scan_fd,
+                    closed,
+                    "list_children must close the descriptor it opened for scandir",
+                )
+            for fd in opened:
+                self.assertIn(fd, closed)
+
+class TestCloseFailureOwnership(_PosixTempRootTestCase):
+    """Close-failure ownership: no double-close, no retry, no orphaned fd.
+
+    Linux releases a descriptor even when close() reports an error, so the
+    adapter must never retry close on the same fd. When a close fails mid
+    traversal the newly opened descriptor must still be cleaned up and the
+    failure surfaced as LocalStorageError with its cause preserved.
+    """
+
+    def test_traversal_close_failure_cleans_new_fd_without_double_close(self) -> None:
+        (self.root_dir / "a").mkdir()
+        (self.root_dir / "a" / "b").mkdir()
+        (self.root_dir / "a" / "b" / "file.txt").write_bytes(b"data")
+
+        with LocalAdapter("src", self.root_dir) as adapter:
+            opened: list[int] = []
+            close_calls: list[int] = []
+            real_open = adapter._os_open
+            real_close = adapter._os_close
+
+            def spy_open(path, flags, *, dir_fd=None):
+                fd = real_open(path, flags, dir_fd=dir_fd)
+                opened.append(fd)
+                return fd
+
+            def flaky_close(fd):
+                close_calls.append(fd)
+                # Model Linux semantics: close() releases the descriptor even
+                # when it reports an error.
+                real_close(fd)
+                if len(close_calls) == 1:
+                    raise OSError(errno.EIO, "injected close failure")
+
+            with (
+                mock.patch.object(adapter, "_os_open", side_effect=spy_open),
+                mock.patch.object(adapter, "_os_close", side_effect=flaky_close),
+            ):
+                with self.assertRaises(LocalStorageError) as cm:
+                    adapter.read_bytes(FileRef("src", "p/a/b/file.txt"))
+
+            self.assertIsInstance(cm.exception.__cause__, OSError)
+            self.assertEqual(cm.exception.__cause__.errno, errno.EIO)
+            # No descriptor is closed twice...
+            self.assertEqual(len(close_calls), len(set(close_calls)))
+            # ...and every descriptor opened during the operation is released.
+            self.assertEqual(set(opened), set(close_calls))
+            for fd in opened:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+
+    def test_root_setup_close_failure_cleans_new_fd_without_double_close(self) -> None:
+        anc = self.base_dir / "x"
+        anc.mkdir()
+        inner = anc / "y"
+        inner.mkdir()
+
+        opened: list[int] = []
+        close_calls: list[int] = []
+        real_open = os.open
+        real_close = os.close
+
+        def spy_open(path, flags, *, dir_fd=None):
+            fd = real_open(path, flags, dir_fd=dir_fd)
+            opened.append(fd)
+            return fd
+
+        def flaky_close(fd):
+            close_calls.append(fd)
+            real_close(fd)
+            if len(close_calls) == 1:
+                raise OSError(errno.EIO, "injected close failure")
+
+        with (
+            mock.patch.object(LocalAdapter, "_os_open", side_effect=spy_open),
+            mock.patch.object(LocalAdapter, "_os_close", side_effect=flaky_close),
+        ):
+            with self.assertRaises(LocalStorageError) as cm:
+                LocalAdapter("src", inner)
+
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+        self.assertEqual(cm.exception.__cause__.errno, errno.EIO)
+        self.assertEqual(len(close_calls), len(set(close_calls)))
+        self.assertEqual(set(opened), set(close_calls))
+        for fd in opened:
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+
+class TestOsErrorWrapping(_PosixTempRootTestCase):
+    """Injected OS failures surface as LocalStorageError with cause + cleanup."""
+
+    def test_scandir_iteration_error_wrapped_and_scan_fd_closed(self) -> None:
+        (self.root_dir / "keep.txt").write_bytes(b"k")
+        with LocalAdapter("src", self.root_dir) as adapter:
+            scan_fd_holder: dict = {}
+
+            class _FailingIter:
+                def __enter__(self):
+                    return self
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    raise OSError(errno.EIO, "injected readdir failure")
+
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    return False
+
+            def fake_scandir(fd):
+                scan_fd_holder["fd"] = fd
+                return _FailingIter()
+
+            closed: list[int] = []
+            real_close = adapter._os_close
+
+            def spy_close(fd):
+                closed.append(fd)
+                return real_close(fd)
+
+            with (
+                mock.patch.object(adapter, "_os_scandir", side_effect=fake_scandir),
+                mock.patch.object(adapter, "_os_close", side_effect=spy_close),
+            ):
+                with self.assertRaises(LocalStorageError) as cm:
+                    adapter.list_children(FileRef("src", ROOT_ID))
+
+            self.assertIsInstance(cm.exception.__cause__, OSError)
+            self.assertEqual(cm.exception.__cause__.errno, errno.EIO)
+            self.assertIn(scan_fd_holder["fd"], closed)
+
+    def test_traversal_fstat_error_wrapped_and_fds_cleaned(self) -> None:
+        (self.root_dir / "a").mkdir()
+        (self.root_dir / "a" / "b").mkdir()
+        (self.root_dir / "a" / "b" / "f.txt").write_bytes(b"x")
+
+        with LocalAdapter("src", self.root_dir) as adapter:
+            opened: list[int] = []
+            closed: list[int] = []
+            real_open = adapter._os_open
+            real_close = adapter._os_close
+            real_fstat = adapter._os_fstat
+            fstat_calls = {"n": 0}
+
+            def spy_open(path, flags, *, dir_fd=None):
+                fd = real_open(path, flags, dir_fd=dir_fd)
+                opened.append(fd)
+                return fd
+
+            def spy_close(fd):
+                closed.append(fd)
+                return real_close(fd)
+
+            def flaky_fstat(fd):
+                fstat_calls["n"] += 1
+                st = real_fstat(fd)
+                if fstat_calls["n"] == 2:
+                    raise OSError(errno.EIO, "injected fstat failure")
+                return st
+
+            with (
+                mock.patch.object(adapter, "_os_open", side_effect=spy_open),
+                mock.patch.object(adapter, "_os_close", side_effect=spy_close),
+                mock.patch.object(adapter, "_os_fstat", side_effect=flaky_fstat),
+            ):
+                with self.assertRaises(LocalStorageError) as cm:
+                    adapter.read_bytes(FileRef("src", "p/a/b/f.txt"))
+
+            self.assertIsInstance(cm.exception.__cause__, OSError)
+            self.assertEqual(cm.exception.__cause__.errno, errno.EIO)
+            self.assertEqual(set(opened), set(closed))
+            self.assertEqual(len(closed), len(set(closed)))
+
+    def test_root_fstat_error_wrapped_and_root_fd_closed(self) -> None:
+        opened: list[int] = []
+        closed: list[int] = []
+
+        def spy_open(path, flags, *, dir_fd=None):
+            fd = os.open(path, flags, dir_fd=dir_fd)
+            opened.append(fd)
+            return fd
+
+        def spy_close(fd):
+            closed.append(fd)
+            os.close(fd)
+
+        def flaky_fstat(fd):
+            raise OSError(errno.EACCES, "injected fstat failure")
+
+        with (
+            mock.patch.object(LocalAdapter, "_os_open", side_effect=spy_open),
+            mock.patch.object(LocalAdapter, "_os_close", side_effect=spy_close),
+            mock.patch.object(LocalAdapter, "_os_fstat", side_effect=flaky_fstat),
+        ):
+            with self.assertRaises(LocalStorageError) as cm:
+                LocalAdapter("src", self.root_dir)
+
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+        self.assertEqual(cm.exception.__cause__.errno, errno.EACCES)
+        self.assertEqual(set(opened), set(closed))
 
 if __name__ == "__main__":
     unittest.main()

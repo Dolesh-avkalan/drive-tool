@@ -5,9 +5,20 @@ backed by an operator-controlled POSIX directory tree.
 
 Security and containment model:
 - Configuration traverses from ``/`` to the target root directory component by
-  component using ``O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK`` and
-  retains the resulting root directory file descriptor until :meth:`close`.
-  Any symlink at the root or in any ancestor component is rejected.
+  component using ``O_RDONLY | O_NOFOLLOW | O_NONBLOCK`` opens anchored with
+  ``dir_fd`` (deliberately WITHOUT ``O_DIRECTORY``). Each returned descriptor is
+  immediately ``fstat``ed and required to be a directory (``S_ISDIR``). The
+  ``O_NOFOLLOW`` alone is the atomic guard: a symlink component (final or
+  intermediate) makes ``openat`` fail with ``ELOOP``, so a directory swapped for
+  a symlink immediately before its open cannot redirect access outside the root.
+  ``O_DIRECTORY`` is intentionally omitted because on some kernels (notably the
+  gVisor sandbox used for acceptance) ``O_NOFOLLOW`` is ignored when combined
+  with ``O_DIRECTORY``, which would silently follow a symlink. Because real
+  no-follow semantics are required and a constant being defined is not trusted,
+  the adapter probes the running kernel at construction time and fails closed
+  with :class:`UnsupportedPlatformError` when ``O_NOFOLLOW`` is not actually
+  enforced. The resulting root directory file descriptor is retained until
+  :meth:`close`.
 - All subsequent operations (`stat`, `list_children`, `read_bytes`) resolve
   canonical ``p/<relative_posix_path>`` IDs step by step using anchored
   directory descriptors (`dir_fd`) and no-follow semantics (`O_NOFOLLOW` /
@@ -41,7 +52,10 @@ from __future__ import annotations
 
 import errno
 import os
+import shutil
 import stat
+import sys
+import tempfile
 from types import TracebackType
 
 from drive_tool.storage import (
@@ -76,36 +90,99 @@ PATH_PREFIX = "p/"
 #: Maximum size of a single ``os.read`` chunk during bounded file reads.
 _READ_CHUNK_SIZE = 65_536
 
+
 class LocalStorageError(StorageError):
     """Base error for local filesystem adapter failures and OS errors."""
+
 
 class UnsafePathError(LocalStorageError, ValueError):
     """Raised when a path or file_id violates containment or symlink policy."""
 
+
 class UnsupportedEntryError(LocalStorageError):
     """Raised when an entry is neither a regular file nor a directory."""
+
 
 class ReadLimitExceededError(LocalStorageError):
     """Raised when a file exceeds the configured ``max_read_bytes`` limit."""
 
+
 class AdapterClosedError(LocalStorageError):
     """Raised when a storage operation is attempted on a closed adapter."""
 
+
 class UnsupportedPlatformError(LocalStorageError):
     """Raised when required POSIX descriptor and no-follow features are absent."""
+
+
+def _no_follow_semantics_available() -> bool:
+    """Actively probe the running kernel for real ``O_NOFOLLOW`` semantics.
+
+    A defined constant is not evidence: some sandboxes (e.g. gVisor) expose
+    ``O_NOFOLLOW`` yet ignore it in certain combinations. This creates a tiny
+    throwaway directory containing a symlink and confirms that opening the
+    symlink with the *exact* flags used for directory components
+    (``O_RDONLY | O_NOFOLLOW | O_NONBLOCK``, no ``O_DIRECTORY``) is refused with
+    ``ELOOP``/``EMLINK``, while a real directory opens and ``fstat`` reports
+    ``S_ISDIR``. Any deviation, including an inability to run the probe, returns
+    ``False`` so the caller can fail closed.
+    """
+    try:
+        base = tempfile.mkdtemp(prefix="drive_tool_nofollow_probe_")
+    except OSError:
+        return False
+    try:
+        target = os.path.join(base, "target")
+        link = os.path.join(base, "link")
+        try:
+            os.mkdir(target)
+            os.symlink(target, link)
+        except OSError:
+            return False
+
+        flags = (
+            os.O_RDONLY
+            | os.O_NOFOLLOW
+            | os.O_NONBLOCK
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        try:
+            fd = os.open(link, flags)
+        except OSError as exc:
+            if exc.errno not in (errno.ELOOP, getattr(errno, "EMLINK", -1)):
+                return False
+        else:
+            # The symlink was followed: O_NOFOLLOW is not enforced.
+            os.close(fd)
+            return False
+
+        try:
+            dir_fd = os.open(target, flags)
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISDIR(os.fstat(dir_fd).st_mode):
+                return False
+        finally:
+            os.close(dir_fd)
+        return True
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
 
 def _check_platform_capabilities() -> None:
     """Verify that the runtime platform supports anchored no-follow I/O.
 
     Raises :class:`UnsupportedPlatformError` if any required POSIX feature is
-    unavailable. Weaker path-string fallbacks are never emulated.
+    unavailable, or if a runtime probe shows that ``O_NOFOLLOW`` is not
+    actually enforced. Weaker path-string fallbacks are never emulated.
     """
     if os.name != "posix":
         raise UnsupportedPlatformError(
             f"LocalAdapter requires a POSIX platform, got os.name={os.name!r}"
         )
 
-    required_flags = ("O_RDONLY", "O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK")
+    required_flags = ("O_RDONLY", "O_NOFOLLOW", "O_NONBLOCK")
     for flag_name in required_flags:
         flag_val = getattr(os, flag_name, None)
         if not isinstance(flag_val, int) or (
@@ -139,15 +216,29 @@ def _check_platform_capabilities() -> None:
             "LocalAdapter requires file descriptor support for os.scandir"
         )
 
+    if not _no_follow_semantics_available():
+        raise UnsupportedPlatformError(
+            "LocalAdapter requires O_NOFOLLOW to actually reject symbolic links "
+            "on this platform (verified by a runtime probe, not merely present "
+            "as a constant)"
+        )
+
+
 def _dir_open_flags() -> int:
-    """Return flags for non-blocking, no-follow directory opens."""
+    """Return flags for a no-follow, non-blocking directory-component open.
+
+    Deliberately excludes ``O_DIRECTORY``: on some kernels ``O_NOFOLLOW`` is
+    ignored when combined with ``O_DIRECTORY``, which would silently follow a
+    symlink. ``O_NOFOLLOW`` alone is honoured there, so it is the atomic guard;
+    the caller verifies the returned descriptor's type with ``fstat``.
+    """
     return (
         os.O_RDONLY
-        | os.O_DIRECTORY
         | os.O_NOFOLLOW
         | os.O_NONBLOCK
         | getattr(os, "O_CLOEXEC", 0)
     )
+
 
 def _file_open_flags() -> int:
     """Return flags for non-blocking, no-follow file opens."""
@@ -157,6 +248,7 @@ def _file_open_flags() -> int:
         | os.O_NONBLOCK
         | getattr(os, "O_CLOEXEC", 0)
     )
+
 
 def _parse_file_id(file_id: object) -> tuple[str, ...]:
     """Validate and decompose ``file_id`` into canonical relative path parts.
@@ -209,6 +301,7 @@ def _parse_file_id(file_id: object) -> tuple[str, ...]:
 
     return tuple(parts)
 
+
 def _validate_root_path_string(root: str | os.PathLike[str]) -> tuple[str, list[str]]:
     """Validate the configured root path and split it into traversal parts."""
     if not isinstance(root, (str, os.PathLike)):
@@ -243,6 +336,7 @@ def _validate_root_path_string(root: str | os.PathLike[str]) -> tuple[str, list[
                 f"root path {raw_root!r} must not contain {part!r} components"
             )
     return raw_root, parts
+
 
 class LocalAdapter:
     """Bounded read-only storage adapter anchored to a POSIX directory descriptor.
@@ -357,10 +451,61 @@ class LocalAdapter:
     def _os_read(self, fd: int, length: int) -> bytes:
         return os.read(fd, length)
 
+    # -- descriptor lifetime helpers ------------------------------------------
+
+    def _close_owned_fd(self, fd: int, *, context: str) -> None:
+        """Close an owned descriptor on the success path, wrapping OS errors.
+
+        Used where closing the descriptor is part of normal control flow (a
+        traversal step succeeded and the previous descriptor is no longer
+        needed). Linux releases the descriptor even when ``close`` reports an
+        error, so the caller must never retry the close on the same fd.
+        """
+        try:
+            self._os_close(fd)
+        except OSError as exc:
+            raise LocalStorageError(
+                f"failed to close descriptor for {context}: {exc}"
+            ) from exc
+
+    def _close_traversal_fd(self, fd: int, *, context: str) -> None:
+        """Close a transient descriptor from a ``finally`` block.
+
+        On the normal path a close failure is wrapped in
+        :class:`LocalStorageError`. While another exception is already
+        propagating the close failure is suppressed, so cleanup can never mask
+        the primary storage error (the kernel releases the descriptor
+        regardless of the reported error).
+        """
+        primary = sys.exc_info()[0]
+        try:
+            self._os_close(fd)
+        except OSError as exc:
+            if primary is not None:
+                return
+            raise LocalStorageError(
+                f"failed to close descriptor for {context}: {exc}"
+            ) from exc
+
+    def _close_quietly(self, fd: int) -> None:
+        """Best-effort close used only while unwinding an existing exception."""
+        try:
+            self._os_close(fd)
+        except OSError:
+            pass
+
     # -- root initialization ---------------------------------------------------
 
     def _open_anchored_root(self, raw_root: str, parts: list[str]) -> int:
-        """Traverse from ``/`` without following symlinks and return root fd."""
+        """Traverse from ``/`` without following symlinks and return root fd.
+
+        Each component is opened atomically with ``O_NOFOLLOW`` (no
+        ``O_DIRECTORY``) and the returned descriptor is ``fstat``ed and required
+        to be a directory. A component swapped for a symlink immediately before
+        its open is rejected by the kernel with ``ELOOP`` (mapped to
+        :class:`UnsafePathError`); there is no separate ``lstat`` and therefore
+        no check-to-use window.
+        """
         dir_flags = _dir_open_flags()
         try:
             current_fd = self._os_open("/", dir_flags)
@@ -368,27 +513,16 @@ class LocalAdapter:
             raise self._classify_root_error("/", None, exc, raw_root) from exc
 
         try:
-            root_st = self._os_fstat(current_fd)
+            try:
+                root_st = self._os_fstat(current_fd)
+            except OSError as exc:
+                raise LocalStorageError(
+                    f"failed to fstat '/' while resolving root {raw_root!r}: {exc}"
+                ) from exc
             if not stat.S_ISDIR(root_st.st_mode):
                 raise ValueError("filesystem '/' is not a directory")
 
             for part in parts:
-                # Explicit no-follow guard: reject a symlink component before
-                # opening it. Some platforms (e.g. gVisor/9p) do not enforce
-                # O_NOFOLLOW together with O_DIRECTORY, so the open below could
-                # otherwise follow the link. On conformant kernels this is a
-                # redundant, additive check on top of O_NOFOLLOW.
-                try:
-                    pre_st = self._os_stat_nofollow(part, dir_fd=current_fd)
-                except OSError as exc:
-                    raise self._classify_root_error(
-                        part, current_fd, exc, raw_root
-                    ) from exc
-                if stat.S_ISLNK(pre_st.st_mode):
-                    raise UnsafePathError(
-                        f"symlink rejected at component {part!r} in root "
-                        f"{raw_root!r}"
-                    )
                 try:
                     next_fd = self._os_open(part, dir_flags, dir_fd=current_fd)
                 except OSError as exc:
@@ -397,21 +531,34 @@ class LocalAdapter:
                     ) from exc
 
                 try:
-                    part_st = self._os_fstat(next_fd)
+                    try:
+                        part_st = self._os_fstat(next_fd)
+                    except OSError as exc:
+                        raise LocalStorageError(
+                            f"failed to fstat component {part!r} while "
+                            f"resolving root {raw_root!r}: {exc}"
+                        ) from exc
                     if not stat.S_ISDIR(part_st.st_mode):
                         raise ValueError(
                             f"root component {part!r} in {raw_root!r} is not a directory"
                         )
                 except BaseException:
-                    self._os_close(next_fd)
+                    self._close_quietly(next_fd)
                     raise
 
-                self._os_close(current_fd)
+                # Take ownership of the new descriptor *before* releasing the
+                # old one, so a failing close cannot leave the new fd orphaned
+                # or cause the old one to be closed twice.
+                prev_fd = current_fd
                 current_fd = next_fd
+                self._close_owned_fd(
+                    prev_fd,
+                    context=f"root component {part!r} of {raw_root!r}",
+                )
 
             return current_fd
         except BaseException:
-            self._os_close(current_fd)
+            self._close_quietly(current_fd)
             raise
 
     def _classify_root_error(
@@ -565,9 +712,12 @@ class LocalAdapter:
         """Traverse intermediate directory components from ``root_fd``.
 
         Returns ``root_fd`` when ``dir_parts`` is empty, or a newly opened
-        directory descriptor for the final intermediate directory. Intermediate
-        descriptors opened along the way are always closed before returning or
-        raising.
+        directory descriptor for the final intermediate directory. Each
+        component is opened atomically with ``O_NOFOLLOW`` (no ``O_DIRECTORY``)
+        and the returned descriptor is ``fstat``ed and required to be a
+        directory, so a component swapped for a symlink immediately before its
+        open is rejected with ``ELOOP``. Intermediate descriptors opened along
+        the way are always closed before returning or raising.
         """
         if not dir_parts:
             return root_fd
@@ -576,24 +726,6 @@ class LocalAdapter:
         current_fd = root_fd
         try:
             for part in dir_parts:
-                # Explicit no-follow guard (see _open_anchored_root): reject a
-                # symlink component before opening it, so intermediate traversal
-                # cannot follow a link even where O_NOFOLLOW is not enforced.
-                try:
-                    pre_st = self._os_stat_nofollow(part, dir_fd=current_fd)
-                except OSError as exc:
-                    raise self._classify_component_open_error(
-                        part,
-                        current_fd,
-                        exc,
-                        file_id,
-                        is_intermediate=True,
-                        for_directory_op= True,
-                    ) from exc
-                if stat.S_ISLNK(pre_st.st_mode):
-                    raise UnsafePathError(
-                        f"symlink encountered at {part!r} for {file_id!r}"
-                    )
                 try:
                     next_fd = self._os_open(part, dir_flags, dir_fd=current_fd)
                 except OSError as exc:
@@ -603,11 +735,17 @@ class LocalAdapter:
                         exc,
                         file_id,
                         is_intermediate=True,
-                        for_directory_op= True,
+                        for_directory_op=True,
                     ) from exc
 
                 try:
-                    st = self._os_fstat(next_fd)
+                    try:
+                        st = self._os_fstat(next_fd)
+                    except OSError as exc:
+                        raise LocalStorageError(
+                            f"failed to fstat component {part!r} for "
+                            f"{file_id!r}: {exc}"
+                        ) from exc
                     if not stat.S_ISDIR(st.st_mode):
                         if stat.S_ISLNK(st.st_mode):
                             raise UnsafePathError(
@@ -621,17 +759,22 @@ class LocalAdapter:
                             f"unsupported entry at {part!r} for {file_id!r}"
                         )
                 except BaseException:
-                    self._os_close(next_fd)
+                    self._close_quietly(next_fd)
                     raise
 
-                if current_fd != root_fd:
-                    self._os_close(current_fd)
+                # Take ownership of the new descriptor before releasing the old
+                # one (see _open_anchored_root).
+                prev_fd = current_fd
                 current_fd = next_fd
+                if prev_fd != root_fd:
+                    self._close_owned_fd(
+                        prev_fd, context=f"component {part!r} of {file_id!r}"
+                    )
 
             return current_fd
         except BaseException:
             if current_fd != root_fd:
-                self._os_close(current_fd)
+                self._close_quietly(current_fd)
             raise
 
     # -- public StorageAdapter contract ----------------------------------------
@@ -693,7 +836,9 @@ class LocalAdapter:
             )
         finally:
             if parent_fd != root_fd:
-                self._os_close(parent_fd)
+                self._close_traversal_fd(
+                    parent_fd, context=f"parent directory of {ref.file_id!r}"
+                )
 
     def list_children(self, parent: FileRef) -> list[FileMetadata]:
         """Return sorted metadata for supported direct children of ``parent``."""
@@ -714,28 +859,6 @@ class LocalAdapter:
             )
             try:
                 target_name = parts[-1]
-                # Explicit no-follow guard (see _open_anchored_root): reject a
-                # symlink target before opening it, so listing a symlinked
-                # directory cannot escape the root even where O_NOFOLLOW is
-                # not enforced together with O_DIRECTORY.
-                try:
-                    pre_st = self._os_stat_nofollow(
-                        target_name, dir_fd=parent_fd
-                    )
-                except OSError as exc:
-                    raise self._classify_component_open_error(
-                        target_name,
-                        parent_fd,
-                        exc,
-                        parent.file_id,
-                        is_intermediate=False,
-                        for_directory_op=True,
-                    ) from exc
-                if stat.S_ISLNK(pre_st.st_mode):
-                    raise UnsafePathError(
-                        f"symlink encountered at {target_name!r} for "
-                        f"{parent.file_id!r}"
-                    )
                 try:
                     scan_fd = self._os_open(
                         target_name, dir_flags, dir_fd=parent_fd
@@ -751,10 +874,17 @@ class LocalAdapter:
                     ) from exc
             finally:
                 if parent_fd != root_fd:
-                    self._os_close(parent_fd)
+                    self._close_traversal_fd(
+                        parent_fd, context=f"parent directory of {parent.file_id!r}"
+                    )
 
         try:
-            dir_st = self._os_fstat(scan_fd)
+            try:
+                dir_st = self._os_fstat(scan_fd)
+            except OSError as exc:
+                raise LocalStorageError(
+                    f"failed to fstat directory {parent.file_id!r}: {exc}"
+                ) from exc
             if not stat.S_ISDIR(dir_st.st_mode):
                 if stat.S_ISLNK(dir_st.st_mode):
                     raise UnsafePathError(
@@ -767,23 +897,20 @@ class LocalAdapter:
                 raise UnsupportedEntryError(
                     f"entry {parent.file_id!r} is not a supported directory"
                 )
-            scandir_it = self._os_scandir(scan_fd)
-        except BaseException as exc:
-            self._os_close(scan_fd)
-            if isinstance(exc, StorageError):
-                raise
-            if isinstance(exc, OSError):
+
+            try:
+                scandir_it = self._os_scandir(scan_fd)
+            except OSError as exc:
                 raise LocalStorageError(
                     f"failed to scan directory {parent.file_id!r}: {exc}"
                 ) from exc
-            raise
 
-        # os.scandir(scan_fd) DUPLICATES the descriptor: CPython performs an
-        # internal _Py_dup() before calling fdopendir(), so the iterator's
-        # context manager closes the duplicate and NOT our scan_fd. Close
-        # scan_fd explicitly (in a finally, so a failed listing cannot leak).
-        children: list[FileMetadata] = []
-        try:
+            # os.scandir(scan_fd) DUPLICATES the descriptor: CPython performs an
+            # internal _Py_dup() before calling fdopendir(), so the iterator's
+            # context manager closes the duplicate and NOT our scan_fd. Close
+            # scan_fd explicitly in the finally below, so a failed listing
+            # cannot leak it.
+            children: list[FileMetadata] = []
             with scandir_it as entries:
                 for entry in entries:
                     name = entry.name
@@ -824,8 +951,16 @@ class LocalAdapter:
                             )
                         )
                     # Special entries (FIFOs, sockets, device nodes) are omitted.
+        except OSError as exc:
+            # A readdir()/scandir iteration failure (or iterator close failure)
+            # is surfaced as a LocalStorageError with the cause preserved.
+            raise LocalStorageError(
+                f"failed to iterate directory {parent.file_id!r}: {exc}"
+            ) from exc
         finally:
-            self._os_close(scan_fd)
+            self._close_traversal_fd(
+                scan_fd, context=f"scan descriptor for {parent.file_id!r}"
+            )
 
         children.sort(key=lambda meta: meta.name)
         return children
@@ -856,12 +991,16 @@ class LocalAdapter:
                 ) from exc
         finally:
             if parent_fd != root_fd:
-                self._os_close(parent_fd)
+                self._close_traversal_fd(
+                    parent_fd, context=f"parent directory of {ref.file_id!r}"
+                )
 
         try:
             return self._read_open_file_bounded(file_fd, ref.file_id)
         finally:
-            self._os_close(file_fd)
+            self._close_traversal_fd(
+                file_fd, context=f"file descriptor for {ref.file_id!r}"
+            )
 
     def _read_open_file_bounded(self, file_fd: int, file_id: str) -> bytes:
         """Verify ``file_fd`` is a regular file and read up to ``max_read_bytes``."""
