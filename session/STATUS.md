@@ -1,3 +1,10 @@
+# Latest milestone — actual cloud test PASS, 2026-10-15 Asia/Calcutta
+
+Supersedes earlier cloud-pending statements below. At owner's explicit request, Codex reviewed and orchestrated Sarvam's unchanged pinned runner on actual directortemp. Candidate 99e102522da4f0eeee465fe231ad62f0cc4ecad8 passed 140 tests on Python 3.14.4 with zero skips; all six filesystem/kernel checks passed, runner exit 0. All 17 source pins and both runner hashes verified before execution. Post-test existing browser services active and API health ok. Synthetic workspace 400 KiB; no installation, reboot, service changes or implementation merge.
+
+Retrieved raw logs via Cloud Shell SSH transfer and visible-terminal chunk transport after browser download failed. Exact log archive SHA256 361b088e0ea7aa2b6b21a53f53a2fea5b41addc180ef34acef662b72bdc24fd8; all 11 retrieved raw-log manifest entries verified. Actual target evidence pinned at drop fad7087b80900a3c3c9c0117a395a23bf19966c1, drive-tool/readonly-core/d014-cloud-target/. Full suite raw tail shows 140 tests, OK, exit 0; descriptor handoff read/list each zero fd delta. Original full target package remains in /tmp/d014-runner-FPAPpc/cloud-evidence.tar.gz, test workspace /tmp/d014-99e10252-7utf_021, retained as evidence. Cloud Shell is at its own prompt after retrieval, not currently connected to VM; existing SSH access remains.
+
+Director accepts integrated read-only core's cloud compatibility gate. No workers active. Next: concrete merge recommendation for owner approval and a separately specified enumeration budget before agent-facing use. Listing currently materializes all direct children; bounded reads do not imply bounded enumeration. Google Drive/OAuth, writes, jobs/API and production deployment remain separate future work. No complete-product claim.
 # Latest checkpoint — 2026-10-15 (Asia/Calcutta)
 
 This block supersedes pending-task statements below; older text is historical.
