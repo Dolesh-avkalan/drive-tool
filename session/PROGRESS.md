@@ -12,6 +12,10 @@ Gemini d008 (4 argon, high, zero repairs) returned CHANGES REQUIRED for child re
 
 d010 (zero relay repairs) completed in Sarvam's sandbox with reported 89-test suites and meaningful base/mutation failures. Worker still reported GitHub write connector unavailable; Codex retrieved the normal downloadable artifacts, checked safe archive paths, inspected source/raw logs, and matched every implementation/evidence Git blob to worker hashes. Transported unchanged source to feature/module-003-resource-fixes at 80bf54885877c475d2ac59ddb3e9f96384600b9e; unchanged raw d009/d010 artifacts to drop 4c2e5b39c616ef5fc96d6d05a77f4506aa49a350. No Drive Tool implementation or test execution by Codex. d011 fresh Gemini review dispatched; d012 fresh independent execution prepared. Acceptance, integration and cloud-box validation remain pending.
 
+## 2026-10-14 — Static acceptance; fresh execution and assembly gates
+
+Gemini d011 accepted exact 80bf548 candidate after static review (4 argon/high, zero repairs, TESTS_NOT_RUN). d012 is now executing in fresh Sarvam context. Prepared d013 isolated read-only core assembly with exact MODULE-002/MODULE-003 pins and cross-module tests. Owner tentatively prefers an existing cloud box; connection method remains unresolved until the synthetic candidate is ready. No implementation merge or cloud deployment.
+
 Append dated milestones. Preserve previous entries and distinguish evidence levels.
 
 ## 2026-10-06 — Browser connection established
