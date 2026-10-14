@@ -1,5 +1,9 @@
 # Progress log
 
+## 2026-10-14 — Development resumed on local scripted browser relay
+
+Owner explicitly resumed Drive Tool and reinforced director/worker separation, simplicity and stability. Local persistent Ubuntu browser VM uses 4 GiB RAM and E-drive storage, with authenticated Gemini/Sarvam verified after restart. Fetched correction branch at c2b324dab4cf720178a36a58b5f1cf1339730151; four changed paths and d007 evidence exist. New d008 Gemini independent review was dispatched with exact source/tests inline; d009 Sarvam execution brief is prepared. Director identified child-descriptor ownership after parent-close failure as an inspection concern, not an executed finding. No implementation edits, test execution, merge or deployment by the director. Cloud-box integration remains later.
+
 Append dated milestones. Preserve previous entries and distinguish evidence levels.
 
 ## 2026-10-06 — Browser connection established

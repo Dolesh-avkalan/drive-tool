@@ -40,3 +40,11 @@ Maintain session/ with current status, decisions, chronological progress, connec
 ## D010 — Two concurrent modules (2026-10-06)
 Owner authorizes two modules at a time, superseding the one-at-a-time limit for this batch. Browser Sarvam continues its MODULE-001 thread for easy MODULE-002 (pagination); Gemini 3.1 Pro gets harder MODULE-003 (bounded read-only local adapter) in another tab. Both branch from pinned MODULE-001, use disjoint files, and do not merge/deploy.
 Gemini cannot push; API messenger captures its complete output and asks browser Sarvam to assemble, execute tests, and push MODULE-003 on its own branch. API messenger does not invent or independently implement missing code. Model selection must be visibly verified; no silent substitute.
+
+## D011 — Local browser relay; cloud-box gate later (2026-10-14)
+
+Owner explicitly resumed Drive Tool after browser migration and reiterated that Codex directs while Gemini and browser Sarvam do implementation and test execution. Use the authenticated local headed Brave host and scripted relay without routine API-agent repair. Gemini's current selected model is `4 argon`; Sarvam handles implementation/assembly/testing. Use fresh contexts for independent verification and preserve useful implementation threads for follow-ups. This supersedes the old VPS messenger requirement and old Gemini 3.1 Pro selection in D002/D003/D010. The later cloud-box test is a separate integration gate; preserve the existing VPS.
+
+## D012 — Predictable modular core (2026-10-14)
+
+Owner's priorities: stable, light, modular, and almost boring behavior. Keep storage contract, adapters, listing, jobs, API and policy separated. Prefer standard library and explicit bounded behavior, deterministic errors and narrow scopes. Correct concrete correctness/resource defects before adding connectors or writes. Require raw evidence and independent review for containment and descriptor ownership; 82 passing worker tests alone do not establish acceptance. Do not add frameworks or rewrite modules without a demonstrated need. Director owns specifications, acceptance and integration; workers implement and execute.
