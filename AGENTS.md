@@ -13,6 +13,7 @@ These files record this project's continuity. Verify live repository heads and h
 - Persist progress, decisions, blockers, evidence, and next steps in session/ after every meaningful milestone and before ending a work session.
 
 ## Evidence and changes
+- New assignments use a short chat instruction plus versioned task/source files. Prefer attachments when the site's upload UI works; otherwise supply pinned GitHub file references and require the teammate to retrieve and confirm their contents. Avoid pasting full source and long briefs into chat unless file delivery is genuinely unavailable. Existing chats/evidence remain historical.
 - Check actual repository artifacts and commits, not just chatbot claims.
 - Distinguish observed facts, team-reported test execution, director review, and independent verification.
 - Never label a result independently tested without independent execution evidence.
