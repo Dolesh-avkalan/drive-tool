@@ -16,16 +16,22 @@ D038 runner prepared and sandbox-tested by Sarvam, published atomically at drop5
 
 PR #4: https://github.com/Dolesh-avkalan/drive-tool/pull/4, head e88c9c7. Approved directly in this chat and merged with expected head e88c9c79fdc27057622d44ba51e008f2e4ea4f4f as 0d9aa8f593e460e3e016114fcde0dc8fc7160951. Codex fetched main and verified drive_tool/ and tests/ are identical to the tested candidate. No deployment.
 
+## Active assignment — D040 range reads
+
+D040 / MODULE-005B dispatched through healthy local VM Sarvam relay, process22319; guest result /home/ubuntu/d040-sarvam-result.json. Chat https://indus.sarvam.ai/indus/c/01M504YGK483ZJSWCY2VYZ4Z4R. Read-only progress confirms authoritative task retrieved, GitHub source inspection plan active, busy=true. Canonical brief tasks/MODULE-005B.md pinned18cc50f613e582e8bcaa9f282bd61b6ea48f1143. Implementation base03a8250a5d02823812533290356cf375b7d2c33e; branch feature/module-005b-range-read. Four allowed files: local.py, two dedicated test files, evidence doc. No service code/merge/deployment.
+
+Contract: optional FileRef-based read_range, bounded pread chunks using existing anchored resolver/ownership; total file may exceed per-window cap. Frozen RangeReadResult with initial observed metadata and eof_observed only on actual empty read within budget. No extra EOF probe, snapshot promise, prefix materialization or shared seek offset. Existing274 tests preserved, builder full-suite and targeted mutation raw evidence required. Publish drop/drive-tool/module-005b/d040-implementation/. Do not duplicate a live assignment or run competing local relay actions. Check result/branch artifacts before review/acceptance; builder result is not independent verification.
 ## Service design
 
 D039 Gemini4argon/high completed, zero repairs, raw outputs/d039-gemini-result.json; saved reply session/history/d039-argon-service-design.md. Design review only, no implementation. Codex has NOT accepted the proposed specification verbatim. Useful: range-read extension before service, retained slots after timed-out I/O, explicit write uncertainty, four-method client and bounded soak. Corrections needed before dispatch: real repository paths/API names (proposal invents src/ layout and LocalAdapter.find); observation-qualified file-size/EOF under mutation; absolute header deadline rather than socket inactivity alone; per-source quotas alone do not guarantee global availability; shutdown cannot promise bounded drain of uninterruptible calls; offset list pages are not a snapshot across calls. Deferred idempotency must be explicit and not imply safe blind retry.
 
 ## Next
 
-PR #4 integrated and exact implementation/test trees verified. Target evidence saved and service health verified. Issue a narrow director contract for range reads using existing FileRef and resolver ownership; Gemini/Sarvam implement and execute. Service/auth/per-agent limits and six-agent 10000-call soak follow. Google Drive/OAuth and public remote access are later gates. Do not call the whole tool complete.
+PR #4 integrated and exact implementation/test trees verified. Target evidence saved and service health verified. D040 range-read implementation/testing is active; collect final source and raw evidence, inspect scope/pins, then arrange fresh independent review/execution. Service/auth/per-agent limits and six-agent 10000-call soak follow. Google Drive/OAuth and public remote access are later gates. Do not call the whole tool complete.
 
 ## Operating agreement
 
-Codex leads delivery and owns design/review/integration. Gemini, DeepSeek and Sarvam are the development team. Use short chat plus versioned task/source files; prefer attachments when working, pinned GitHub files otherwise. Gemini file-link/upload failure can justify a compact necessary inline source fallback. Delegate implementation and tests; director may orchestrate teammate-written target runners, transport artifacts and inspect evidence. No implementation merge/deployment without concrete approval. Never publish credentials or private browser state. No active local relay task remains after D039; cloud D038 is complete. Preserve browser services and synthetic evidence.
+Codex leads delivery and owns design/review/integration. Gemini, DeepSeek and Sarvam are the development team. Use short chat plus versioned task/source files; prefer attachments when working, pinned GitHub files otherwise. Gemini file-link/upload failure can justify a compact necessary inline source fallback. Delegate implementation and tests; director may orchestrate teammate-written target runners, transport artifacts and inspect evidence. No implementation merge/deployment without concrete approval. Never publish credentials or private browser state. D040 local relay is active (see above); cloud D038 is complete. Preserve browser services and synthetic evidence.
+
 
 

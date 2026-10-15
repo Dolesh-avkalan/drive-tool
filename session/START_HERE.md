@@ -1,6 +1,6 @@
 # Resume Drive Tool
 
-Read session/STATUS.md first. Codex resumed after Claude's 2026-10-15 handoff; PR #3 merged as a84f6b3 after approval. D031 design is complete; D032 partial-scan implementation is active on the local VM; do not duplicate it. Current STATUS supersedes older active-task statements below.
+Read session/STATUS.md first. Approved PR #4 is merged as0d9aa8f. D040 bounded range reads is active with browser Sarvam; do not duplicate it. Current STATUS supersedes every historical active-task statement below.
 
 # Resume Drive Tool here
 
@@ -39,3 +39,4 @@ The owner requested this folder so another session can resume by fetching it. Ne
 
 ## Latest steering: concurrent batch
 Owner authorized MODULE-002 and MODULE-003 together. Read their briefs and session/DECISIONS.md D010. API Sarvam accepted the batch at epoch 19 after event 103. Do not dispatch duplicates; inspect its live event log for actual per-site delivery/model selection or blockers. Gemini output is captured and sent to browser Sarvam for testing/push. MODULE-001 remains unmerged. This newer note supersedes the single-module resume sequence above.
+
