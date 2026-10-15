@@ -189,3 +189,10 @@ director before pushing): d6f8afb (d023 file, byte-identical), 2bb2c3a "Sarvam f
 -> sub/leaf; the ID prefix p/ is not a folder), 70a7a00 evidence; 175 tests OK on 3.11.2/3.12.13
 (worker-reported). Director: 175/175 on 3.13.16; independent mutation check, all 6 mutations caught.
 Accepted as D017; PR to main opened for Dolesh's approval.
+
+## 2026-10-15 — MODULE-004 merged (af42edb); MODULE-005 dispatched
+
+Dolesh merged PR #2 (MODULE-004) as af42edb. Brief tasks/MODULE-005.md (safe local writes: LocalWriter with
+atomic no-replace publish via link, overwrite via rename, temp files hidden from listings, mkdir). Relay chain:
+d025 Argon design review, d026 DeepSeek implementation (Argon's recommendations pre-accepted unless they weaken a
+security rule), d027 Sarvam assemble/test/mutation-check/push (held for director check), d028 Argon code review.
