@@ -367,3 +367,5 @@ DeepSeek finished D069 runner fixes (generated only). Queued D072 Sarvam assembl
 Both-Sarvam completion: D067 test file published but55skipped pending adapter; dispatched D073 actual integration execution, no false test claim. D070 independently confirms DeepSeek test-order patch and semantic guard, but no remote candidate; defer publication handoff until current source assembly queue clears. Minimal director collection.
 
 22:01UTC: Collected D071 exact single-module assembly/import evidence and verified productionblob02576d59. Queued Gemini D074 security while local D073 actual integration active; final gates pending, no merge.
+
+Collected D073 realHTTP failures; honest conformance blocked. Authorized bounded Sarvam subagents per user. Routed auth/CL observable contract issues to Gemini D075, known harness seam correction to local Sarvam D076 only. No weakened tests/director implementation.
