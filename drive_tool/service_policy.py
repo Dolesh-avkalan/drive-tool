@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import re
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 OPERATIONS: frozenset[str] = frozenset({'find', 'list', 'read', 'save'})
 MAX_TRANSFER_BYTES: int = 1048576
@@ -160,7 +161,7 @@ class PolicyTable:
             seen_digests.add(agent.token_sha256)
             digests.append(agent.token_sha256)
         self._agents: tuple[AgentPolicy, ...] = tuple(agents)
-        self._by_id: dict[str, AgentPolicy] = dict(by_id)
+        self._by_id: Mapping[str, AgentPolicy] = MappingProxyType(dict(by_id))
         self._digests: tuple[bytes, ...] = tuple(digests)
 
     def authenticate(self, token) -> AgentPolicy:
