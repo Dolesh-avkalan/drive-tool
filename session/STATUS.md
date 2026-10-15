@@ -1,6 +1,6 @@
 # Current Drive Tool status
 
-Checkpoint: 2026-10-15. Current main contains MODULE-001..005, including approved PR #3 merge a84f6b3. MODULE-005A PR #4 remains unmerged pending concrete approval. No service deployment.
+Checkpoint: 2026-10-15. Current main contains MODULE-001..005, including approved PR #3 merge a84f6b3. MODULE-005A PR #4 merged as 0d9aa8f593e460e3e016114fcde0dc8fc7160951 after direct approval in this chat. No service deployment.
 
 ## MODULE-005A: reviewed candidate
 
@@ -14,7 +14,7 @@ D037 independent execution ACCEPT, drop6c8db8967dc61c0468a6e3b3b8abdbe363cb8b58,
 
 D038 runner prepared and sandbox-tested by Sarvam, published atomically at drop5019f5ae266c399af2530d92c079b7e4dd9a3a10, drive-tool/module-005a/d038-cloud-runner/. Codex verified all18 executable Python blob pins against candidate Git tree, reviewed both scripts and sandbox negative gates, and verified downloaded script SHA256 on directortemp. Authorized synthetic target execution of teammate-written runner: Python3.14.4, ext4 /var/tmp, candidate e88,274 tests zero skips and all10 checks PASS, exit0. Workspace /var/tmp/d038-e88c9c79-x_u8hul3; runner /var/tmp/d038-runner-lyeNmb. Evidence saved and published at drop654b2eaac41f0d613bea905b523b2916d85e98e6 under drive-tool/module-005a/d038-cloud-target/. Full archive17458bytes SHA2562e77d6d86e8326e31881686d659034b2f5bd72ce93f07e23eb5287d42372eae2 matched after visible-terminal transport; all15 retained manifest log entries hash-verified. Post-run browser services bh-brave/bh-mcp/bh-hostd active, APIhealthy, workspace1.2MiB, root559MiBfree. No package/service/reboot/real-storage changes. Do not repeat the run without a reason.
 
-PR #4: https://github.com/Dolesh-avkalan/drive-tool/pull/4, head e88c9c7. Ready for review, body updated with pinned independent/frontier/target evidence; mergeable=true and not merged. Concrete approval requested in this chat under session/CORE-ACCEPTANCE.md. Approval of PR #3 does not approve PR #4.
+PR #4: https://github.com/Dolesh-avkalan/drive-tool/pull/4, head e88c9c7. Approved directly in this chat and merged with expected head e88c9c79fdc27057622d44ba51e008f2e4ea4f4f as 0d9aa8f593e460e3e016114fcde0dc8fc7160951. Codex fetched main and verified drive_tool/ and tests/ are identical to the tested candidate. No deployment.
 
 ## Service design
 
@@ -22,9 +22,10 @@ D039 Gemini4argon/high completed, zero repairs, raw outputs/d039-gemini-result.j
 
 ## Next
 
-Await concrete PR #4 merge approval; use expected head e88c9c79fdc27057622d44ba51e008f2e4ea4f4f if approved. Target evidence saved, service health verified and PR ready. Then issue a narrow director contract for range reads using existing FileRef and resolver ownership; Gemini/Sarvam implement and execute. Service/auth/per-agent limits and six-agent 10000-call soak follow. Google Drive/OAuth and public remote access are later gates. Do not call the whole tool complete.
+PR #4 integrated and exact implementation/test trees verified. Target evidence saved and service health verified. Issue a narrow director contract for range reads using existing FileRef and resolver ownership; Gemini/Sarvam implement and execute. Service/auth/per-agent limits and six-agent 10000-call soak follow. Google Drive/OAuth and public remote access are later gates. Do not call the whole tool complete.
 
 ## Operating agreement
 
 Codex leads delivery and owns design/review/integration. Gemini, DeepSeek and Sarvam are the development team. Use short chat plus versioned task/source files; prefer attachments when working, pinned GitHub files otherwise. Gemini file-link/upload failure can justify a compact necessary inline source fallback. Delegate implementation and tests; director may orchestrate teammate-written target runners, transport artifacts and inspect evidence. No implementation merge/deployment without concrete approval. Never publish credentials or private browser state. No active local relay task remains after D039; cloud D038 is complete. Preserve browser services and synthetic evidence.
+
 
