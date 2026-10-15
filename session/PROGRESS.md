@@ -147,3 +147,12 @@ WSL /mnt/c or FUSE); silent omission of symlinks/special/backslash names in list
 1,089-line adapter with duplicated helpers; FileMetadata lacks README's modified_at and
 checksum. Verdict: sound read-only foundation. Design for the agent layer recorded as D016,
 session/AGENT-INTERFACE.md.
+
+## 2026-10-15 — MODULE-004 dispatched (bounded enumeration and find)
+
+Brief tasks/MODULE-004.md. Dispatched on the browser-tool relay bus (box directortemp) as a
+chain run in order: d016 Gemini 4 Argon (high) design review and edge-case/test plan;
+d017 DeepSeek (DeepThink) implementation and tests; d018 Sarvam assembly on
+feature/module-004-bounded-enumeration, test execution, push, evidence; d019 Argon code
+review of the pushed branch. Outputs in the drop repo under drive-tool/module-004/.
+Director acceptance (independent execution and adversarial checks) follows.

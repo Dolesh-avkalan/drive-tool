@@ -1,3 +1,10 @@
+# Active â MODULE-004 in progress, 2026-10-15 Asia/Calcutta
+
+Bounded enumeration (adapter-side entry budget, typed EnumerationLimitError) and bounded
+find; brief tasks/MODULE-004.md. Relay chain d016 (Argon design review) -> d017 (DeepSeek
+code+tests) -> d018 (Sarvam assemble/test/push to feature/module-004-bounded-enumeration)
+-> d019 (Argon code review); outputs in drop drive-tool/module-004/. Not accepted yet.
+
 # Latest milestone — agent interface design and core quality review, 2026-10-15 Asia/Calcutta
 
 Director review of main (d510661): the read-only core is a sound foundation (140/140 tests,
