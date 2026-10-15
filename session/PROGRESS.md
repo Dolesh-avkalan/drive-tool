@@ -156,3 +156,27 @@ d017 DeepSeek (DeepThink) implementation and tests; d018 Sarvam assembly on
 feature/module-004-bounded-enumeration, test execution, push, evidence; d019 Argon code
 review of the pushed branch. Outputs in the drop repo under drive-tool/module-004/.
 Director acceptance (independent execution and adversarial checks) follows.
+
+## 2026-10-15 — MODULE-004 implemented on its branch; review ACCEPT WITH NITS
+
+- d016 Argon design review: 7 gaps in the brief; all adopted as director decisions (EnumerationLimitError
+  constructor; limit error on the starting parent returns a truncated result; truncation precedence;
+  within-level ordering; validation order; local.py delivery limits; case_sensitive type).
+- d017 DeepSeek: reply cut off at DeepSeek's output limit (13,812 chars) and ran without the decisions
+  (task edited too close to its start). Discarded. d018 Sarvam started on it; stopped by the director at
+  step 0 of 7, nothing pushed. Relay fixed (DeepSeek Continue; browser-tool PRs 10 and 11).
+- d020 DeepSeek (DeepThink) rerun with the decisions: complete output, 5 files + 3 local.py blocks (the
+  director pressed Continue once by hand when the reasoning was cut off).
+- d021 Sarvam: branch feature/module-004-bounded-enumeration, 790ca3f (DeepSeek code), 3806132 (evidence);
+  169 tests OK on Python 3.11.2 and 3.12.13 (worker-reported), no fixes.
+- Director verification (independent): branch files byte-identical to d020 (5 files; 3 local.py blocks
+  verbatim; local.py diff only imports/__init__/list_children). 169/169 OK on Python 3.13.16; branch
+  coverage search.py 100%, listing.py 100%. Probes: 10-item page over 200,000 files now raises
+  EnumerationLimitError(10000) in 0.58 s, 3.1 MB peak (was 2.0 s, 76 MB); 500 limit errors, fd delta 0;
+  depth/result limits, symlink to /etc not followed, argument validation all as specified.
+- Design gap found by the director (not a defect against the brief): find() in a folder larger than its
+  entry budget returns no results at all (listing is all-or-nothing), e.g. 0 items for a 200,000-file
+  root. Needs a partial/streamed listing contract in a later module.
+- d022 Argon code review: ACCEPT WITH NITS, no blocking findings; 5 test-proof nits.
+- d023 DeepSeek proof tests for the 5 nits and d024 Sarvam (add, mutation-check, push) dispatched.
+  Not accepted or merged yet.
