@@ -286,3 +286,8 @@ Live check: local relay idle; D045 completed16:38:09Z with generated files/TESTS
 ## D029 — two implementations active across hosts (2026-10-15)
 
 Dolesh points out only one teammate active. Codex fixes scheduling by assigning local Sarvam D047 Python client/fake-server tests against a concrete four-method wire contract, disjoint from cloud D046 policy assembly. Briefd14b1b7, basecedaa13, branchfeature/module-006a-client, two new files; process43959. Live local read-only progress confirms brief/source connector activity and busy=true. Live cloud viewer independently confirms D046 active with verbatim initial policy and separate fixes/final evidence underway. NUL/backslash concern is not confirmed by builder probes; immutable lookup violation confirmed. Two browser hosts now doing separate implementation/test work simultaneously. No third same-host concurrency claim, no source implementation by Codex, no merge/deployment until evidence gates.
+
+## 2026-10-15 — policy candidate collected, frontier/execution gates queued
+
+User says Argon should be back and cloud assembly done. D046 report/raw413/6mutations and exactsource dc3c2af7 inspected, drop3e03040. Two confirmed fixes attributed; root-escape concerns disconfirmed. D0484Argon/high static review and D049 fresh independent Sarvam execution queued cloudbusdeafa29, pinned4878271. Quota/model gate must prove availability; current new Gemini tab not proof review started. Local D047 independent client implementation continues. No acceptance/merge yet.
+
