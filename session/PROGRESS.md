@@ -315,3 +315,6 @@ D052 local start verified in fresh chat01M508EQ259JDM1PMMA5W3PK56, busy=true and
 ## D033 — same-chat completion heartbeat (2026-10-15)
 
 Dolesh identifies the orchestration gap: once director turn ends, teammate completion does not wake it; he has been manually prompting. Codex checked official scheduled-task documentation and used app automation_update to create ACTIVE same-thread heartbeat Drive Tool team handoffs (id drive-tool-team-handoffs), every5minutes. It checks current pinned results/evidence, continues scoped reviews/corrections/assembly and verified merges underD025, keeps unchanged state quiet, notifies meaningful completion/failure/input only. Scope is current local agent-service+synthetic reliability milestone; no new OAuth/real roots/public deployment. Disable when milestone/no pending authorized work or user stop. Existing app/PC must stay running; no instant callback or delivery guarantee. This closes handoff wake-up gap without building a new scheduler framework. Existing browser jobs are not restarted or duplicated.
+
+Dolesh requested a ten-minute cadence because Sarvam tasks commonly take that long. Updated existing heartbeat drive-tool-team-handoffs to every10minutes through the app tool, statusACTIVE; prompt, scope and quiet-notification behavior preserved. No duplicate automation.
+
