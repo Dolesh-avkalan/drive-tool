@@ -282,3 +282,7 @@ D043 reproduced351tests/zero skips3.11/3.12,7mutants caught for intended asserti
 
 Live check: local relay idle; D045 completed16:38:09Z with generated files/TESTS_NOT_RUN, drop1aa5ba7. Codex read production output; potential escaped-root validation and mutable lookup issues flagged for actual tests. D046 assembly/testing dispatched cloud bus45904d3, pinned briefb0f5d8d, useful D044 chat; start pending. Verbatim initial candidate + initial raw tests required before narrow attributed fixes. Local verification complete, no other task claimed active. Handoff delayed until status check; do not describe a completed generation as still running.
 
+
+## D029 — two implementations active across hosts (2026-10-15)
+
+Dolesh points out only one teammate active. Codex fixes scheduling by assigning local Sarvam D047 Python client/fake-server tests against a concrete four-method wire contract, disjoint from cloud D046 policy assembly. Briefd14b1b7, basecedaa13, branchfeature/module-006a-client, two new files; process43959. Live local read-only progress confirms brief/source connector activity and busy=true. Live cloud viewer independently confirms D046 active with verbatim initial policy and separate fixes/final evidence underway. NUL/backslash concern is not confirmed by builder probes; immutable lookup violation confirmed. Two browser hosts now doing separate implementation/test work simultaneously. No third same-host concurrency claim, no source implementation by Codex, no merge/deployment until evidence gates.
