@@ -148,9 +148,9 @@ class EnumerationProofTests(unittest.TestCase):
             self.skipTest("/proc/self/fd not available")
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "p" / "sub" / "leaf").mkdir(parents=True)
+            (root / "sub" / "leaf").mkdir(parents=True)
             for i in range(10):
-                (root / "p" / "sub" / "leaf" / f"f{i}.txt").write_text("x")
+                (root / "sub" / "leaf" / f"f{i}.txt").write_text("x")
             adapter = self._adapter(root)
             ref = FileRef("src", "p/sub/leaf")
             try:
