@@ -308,3 +308,6 @@ Dolesh asks for work for idle Gemini/DeepSeek. Codex specifies D050 minimal sync
 User says both Sarvam jobs done. D049 independent report/raw413/6semanticmutants/103probes read, drop20321d4, ACCEPT WITH NITS no blocker; D048 frontier0blockers. Codex accepts dc3c2af7 and creates/attaches/merges PR6 via expectedhead underD025, mergee55c9f741a528ce9298b5041012373195e878eaf. Fetchedmain source/tests exactly match reviewedcandidate. No deployment/3.14/realservice claim; annotation nit retained as nonblocking observation.
 
 D047 local completed zero repairs, report/raw412/61new/6mutants3.11/3.12 at dropc2c90a3; finalhead81a6485 same productionblob as queuedD051. D052 fresh local independent execution/integrated candidate assembly dispatched process23827, briefd65d30a, basee55c9f7+twoexactclientfiles, no fixes/merge. D050 cloud launch visibleArgonMedium selected; prompt submission pendingverification, D051 queued. Do not claim all jobs concurrent on one host.
+
+D052 local start verified in fresh chat01M508EQ259JDM1PMMA5W3PK56, busy=true and independent pinned-source/integration plan visible. D050 cloud start verified chatd75caccb6796507d, ArgonMedium and active backend-code generation. Both hosts doing distinct work simultaneously; D051 queued. PR6 policy merge reported to user.
+
