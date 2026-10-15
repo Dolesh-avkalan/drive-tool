@@ -51,7 +51,9 @@ class BaseLocalWriteTest(unittest.TestCase):
         self._tmpdir = tempfile.mkdtemp(prefix="drive_tool_lw_")
         self.root = os.path.join(self._tmpdir, "root")
         os.mkdir(self.root)
-        self.adapter = LocalAdapter("src", self.root)
+        self.adapter = LocalAdapter(
+            "src", self.root, max_read_bytes=DEFAULT_MAX_WRITE_BYTES
+        )
         self.writer = LocalWriter(self.adapter)
 
     def tearDown(self) -> None:
