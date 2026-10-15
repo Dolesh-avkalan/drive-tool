@@ -75,3 +75,13 @@ replies and a fixed error-code set, stateless calls, adapters held open for the 
 lifetime, per-agent caps and deadlines, scan-time enumeration budgets, atomic no-overwrite
 saves, and a 6-agent soak test as the rollout gate. Module order: MODULE-004 bounded
 enumeration, MODULE-005 save, MODULE-006 service, then soak. Google Drive follows.
+
+## D017 — MODULE-004 accepted at 70a7a00 (2026-10-15)
+
+Director acceptance of feature/module-004-bounded-enumeration at 70a7a00 (bounded list_children with
+EnumerationLimitError, ListingService passthrough, bounded breadth-first find). Basis: Argon code review
+ACCEPT WITH NITS (d022, no blocking findings); proof tests for all five nits (d023 DeepSeek, d024 Sarvam,
+one test-fixture path fix in 2bb2c3a); independent director execution 175/175 on Python 3.13.16 and an
+independent mutation check (6 targeted mutations, each caught by its proof test), matching Sarvam's table.
+Known design gap, deferred to a later module: find() in a folder larger than its entry budget returns no
+items (listing is all-or-nothing). Merge into main only with Dolesh's approval.

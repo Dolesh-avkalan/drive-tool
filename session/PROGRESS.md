@@ -180,3 +180,12 @@ Director acceptance (independent execution and adversarial checks) follows.
 - d022 Argon code review: ACCEPT WITH NITS, no blocking findings; 5 test-proof nits.
 - d023 DeepSeek proof tests for the 5 nits and d024 Sarvam (add, mutation-check, push) dispatched.
   Not accepted or merged yet.
+
+## 2026-10-15 — MODULE-004 proof tests and director acceptance
+
+d023 DeepSeek: tests/test_enumeration_proofs.py (6 tests for Argon's 5 nits). d024 Sarvam (re-run once after
+a browser-tool deploy restarted the relay mid-task; the interrupted duplicate Sarvam chat was stopped by the
+director before pushing): d6f8afb (d023 file, byte-identical), 2bb2c3a "Sarvam fixes" (fixture path p/sub/leaf
+-> sub/leaf; the ID prefix p/ is not a folder), 70a7a00 evidence; 175 tests OK on 3.11.2/3.12.13
+(worker-reported). Director: 175/175 on 3.13.16; independent mutation check, all 6 mutations caught.
+Accepted as D017; PR to main opened for Dolesh's approval.
