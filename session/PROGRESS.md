@@ -273,3 +273,7 @@ Dolesh asks to use DeepSeek after cloud Sarvam completes. D044 delivered source-
 
 D045 start verified in cloud viewer, DeepThink actively generating policy code, chat26cfe297-e5e0-4416-9bc5-3370d58f7a84. No final output or execution claim.
 
+
+## D028 — range reads independently accepted and merged (2026-10-15)
+
+D043 reproduced351tests/zero skips3.11/3.12,7mutants caught for intended assertions,34new adversarial probes bothversions. Evidence drop24a9a45349f2e38eef91e7bb8626aa944cbfe9db; reviewer ACCEPT WITH NITS, no blocker. Codex read full production diff/review/raw logs and accepts121faf848b2f33f80721239fc7716adba7a9ba62. Two maintenance/ordering nits do not change current behavior; retain as observations, no speculative refactor. PR5 created/attached and merged under standingD025 with expectedhead121faf8, merge1515182d0f273518d20a2ef80b5182cf6b36def2. Fetched main and verified drive_tool/tests identical to testedcandidate. No deployment; no new actualcloud/3.14 range-delta test claimed. D045 service policy generation pending.
