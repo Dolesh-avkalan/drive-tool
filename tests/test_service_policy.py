@@ -296,9 +296,21 @@ class AuthenticationTests(unittest.TestCase):
             self.assertEqual(str(ctx.exception), 'access denied')
 
     def test_visible_ascii_bounds_accepted(self):
-        # '!' (33) and '~' (126) are visible; length 32 is minimum.
-        self.table.authenticate('!' * 32)  # unknown -> denied
-        # (we only assert it did not raise for charset; unknown token still denies)
+        # '!' (cp 33) and '~' (cp 126) are the visible-ASCII boundary
+        # codepoints; length 32 is the minimum. A configured token built
+        # only from those boundary characters must authenticate to its
+        # exact AgentPolicy (the charset bound is accepted, not rejected).
+        tok_low = '!' * 32
+        tok_high = '~' * 32
+        agents = (
+            AgentPolicy(agent_id='lo', token_sha256=digest(tok_low),
+                        grants=(make_grant(alias='g'),)),
+            AgentPolicy(agent_id='hi', token_sha256=digest(tok_high),
+                        grants=(make_grant(alias='g'),)),
+        )
+        table = PolicyTable(agents)
+        self.assertIs(table.authenticate(tok_low), agents[0])
+        self.assertIs(table.authenticate(tok_high), agents[1])
 
     def test_compares_all_digests_no_early_return(self):
         calls: list = []
