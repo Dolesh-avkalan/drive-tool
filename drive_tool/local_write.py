@@ -60,7 +60,7 @@ class WriteLimitExceededError(LocalStorageError):
 
 def _check_writer_platform_capabilities() -> None:
     """Fail closed when the runtime lacks write-related POSIX features."""
-    for flag_name in ("O_WRONLY", "O_CREAT", "O_EXCL"):
+    for flag_name in ("O_WRONLY", "O_CREAT", "O_EXCL", "O_NOFOLLOW", "O_CLOEXEC"):
         if not isinstance(getattr(os, flag_name, None), int):
             raise UnsupportedPlatformError(
                 f"LocalWriter requires os.{flag_name} support on this platform"
@@ -588,6 +588,7 @@ class LocalWriter:
                     raise LocalStorageError(
                         f"failed to link temporary file to {name!r}: {exc}"
                     ) from exc
+                tmp_on_disk = False
                 try:
                     self._os_unlink(tmp_name, dir_fd=parent_fd)
                 except OSError as exc:
@@ -595,7 +596,6 @@ class LocalWriter:
                         f"failed to unlink temp name after linking "
                         f"{name!r}: {exc}"
                     ) from exc
-                tmp_on_disk = False
 
             try:
                 self._os_fsync(parent_fd)
