@@ -88,6 +88,9 @@ DEFAULT_MAX_READ_BYTES = 1_048_576
 #: Mandatory prefix for all non-root entry IDs in ``LocalAdapter``.
 PATH_PREFIX = "p/"
 
+#: Prefix for hidden temporary files created by ``LocalWriter``.
+TEMP_PREFIX = ".drive-tool-tmp-"
+
 #: Maximum size of a single ``os.read`` chunk during bounded file reads.
 _READ_CHUNK_SIZE = 65_536
 
@@ -990,6 +993,7 @@ class LocalAdapter:
                         or "/" in name
                         or "\\" in name
                         or "\x00" in name
+                        or name.startswith(TEMP_PREFIX)
                     ):
                         continue
                     try:
