@@ -343,3 +343,5 @@ Completion collection: backend independent D058 ACCEPT with published14729120; G
 2026-10-16 resume (client timezone): Collected D062 exact source/raw evidence, verified506combinedtests/54probes/semantic mutation failures and expected blobs. Merged PR8 exact67d37b2 with expected-head protection, mergeb7f8d17b. D061 relay had host-call failure; resumed same Gemini design context, no duplicate implementation. Cloud idle pending real HTTP contract dependency; no busywork.
 
 2026-10-16: User authorized separate stress box; connected through existing GCP Cloud Shell credentials and gcloud SSH, confirmed target prompt/specs. No credentials exposed or service deployed; future bounded synthetic runner can use this existing session after local gates.
+
+2026-10-16: User requests Sarvam cloud execution through GitHub. Inspected historical D014/D038 actual mechanism; dispatched D063 Sarvam-owned pinned runner and bounded stress/edge evidence loop on cloud browser queue. No credentials in GitHub or arbitrary remote-shell bridge. Target execution pending runner review, HTTP gate pending accepted adapter.
