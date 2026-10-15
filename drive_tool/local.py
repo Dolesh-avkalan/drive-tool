@@ -60,6 +60,7 @@ from types import TracebackType
 
 from drive_tool.storage import (
     ROOT_ID,
+    EnumerationLimitError,
     FileMetadata,
     FileRef,
     IsDirectoryError,
@@ -357,6 +358,7 @@ class LocalAdapter:
         root: str | os.PathLike[str],
         *,
         max_read_bytes: int = DEFAULT_MAX_READ_BYTES,
+        max_list_entries: int = 10_000,
     ) -> None:
         if not isinstance(source_id, str) or source_id == "":
             raise ValueError("source_id must be a non-empty string")
@@ -366,12 +368,19 @@ class LocalAdapter:
             or max_read_bytes <= 0
         ):
             raise ValueError("max_read_bytes must be a positive integer")
+        if (
+            isinstance(max_list_entries, bool)
+            or not isinstance(max_list_entries, int)
+            or max_list_entries < 1
+        ):
+            raise ValueError("max_list_entries must be a positive integer")
 
         _check_platform_capabilities()
         raw_root, root_parts = _validate_root_path_string(root)
 
         self._source_id = source_id
         self._max_read_bytes = max_read_bytes
+        self._max_list_entries = max_list_entries
         self._closed = False
         self._root_fd: int | None = None
         self._root_fd = self._open_anchored_root(raw_root, root_parts)
@@ -864,9 +873,30 @@ class LocalAdapter:
                     parent_fd, context=f"parent directory of {ref.file_id!r}"
                 )
 
-    def list_children(self, parent: FileRef) -> list[FileMetadata]:
-        """Return sorted metadata for supported direct children of ``parent``."""
+    def list_children(
+        self, parent: FileRef, *, max_entries: int | None = None
+    ) -> list[FileMetadata]:
+        """Return sorted metadata for supported direct children of ``parent``.
+
+        ``max_entries``, when not ``None``, bounds the number of directory
+        entries examined during the scan (overriding ``max_list_entries``);
+        exceeding it raises :class:`EnumerationLimitError`. Every entry
+        yielded by the scan counts toward the limit, including symlinks and
+        special files that are later omitted.
+        """
         root_fd = self._check_source_and_state(parent)
+        if max_entries is None:
+            effective_limit = self._max_list_entries
+        else:
+            if (
+                isinstance(max_entries, bool)
+                or not isinstance(max_entries, int)
+                or max_entries < 1
+            ):
+                raise ValueError(
+                    "max_entries must be a positive integer or None"
+                )
+            effective_limit = max_entries
         parts = _parse_file_id(parent.file_id)
         dir_flags = _dir_open_flags()
 
@@ -941,8 +971,19 @@ class LocalAdapter:
             # scan_fd explicitly in the finally below, so a failed listing
             # cannot leak it.
             children: list[FileMetadata] = []
+            entry_count = 0
             with scandir_it as entries:
                 for entry in entries:
+                    # Count every entry yielded by the scan, before any name
+                    # filtering or stat, so symlinks, special files and odd
+                    # names all count toward the limit.
+                    entry_count += 1
+                    if entry_count > effective_limit:
+                        raise EnumerationLimitError(
+                            effective_limit,
+                            f"directory {parent.file_id!r} exceeds limit of "
+                            f"{effective_limit} entries",
+                        )
                     name = entry.name
                     if (
                         name in ("", ".", "..")

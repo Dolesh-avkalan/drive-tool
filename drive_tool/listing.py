@@ -25,7 +25,6 @@ __all__ = ["ListingPage", "ListingService", "MIN_LIMIT", "MAX_LIMIT"]
 MIN_LIMIT = 1
 MAX_LIMIT = 100
 
-
 @dataclass(frozen=True)
 class ListingPage:
     """One page of listing results.
@@ -38,7 +37,6 @@ class ListingPage:
     items: tuple[FileMetadata, ...]
     next_offset: int | None
 
-
 def _validate_limit(limit: object) -> None:
     # bool is a subclass of int, so reject it explicitly before the int check.
     if isinstance(limit, bool) or not isinstance(limit, int):
@@ -46,13 +44,11 @@ def _validate_limit(limit: object) -> None:
     if limit < MIN_LIMIT or limit > MAX_LIMIT:
         raise ValueError(f"limit must be between {MIN_LIMIT} and {MAX_LIMIT}, got {limit}")
 
-
 def _validate_offset(offset: object) -> None:
     if isinstance(offset, bool) or not isinstance(offset, int):
         raise ValueError(f"offset must be an int, got {type(offset).__name__}")
     if offset < 0:
         raise ValueError(f"offset must be >= 0, got {offset}")
-
 
 def _validate_name_contains(name_contains: object) -> None:
     if name_contains is not None and not isinstance(name_contains, str):
@@ -60,6 +56,16 @@ def _validate_name_contains(name_contains: object) -> None:
             f"name_contains must be None or str, got {type(name_contains).__name__}"
         )
 
+def _validate_max_entries(max_entries: object) -> None:
+    if max_entries is None:
+        return
+    if isinstance(max_entries, bool) or not isinstance(max_entries, int):
+        raise ValueError(
+            f"max_entries must be a positive int or None, "
+            f"got {type(max_entries).__name__}"
+        )
+    if max_entries < 1:
+        raise ValueError(f"max_entries must be >= 1, got {max_entries}")
 
 class ListingService:
     """Read-only paginated listing over a ``StorageAdapter``."""
@@ -74,21 +80,32 @@ class ListingService:
         limit: int = 50,
         offset: int = 0,
         name_contains: str | None = None,
+        max_entries: int | None = None,
     ) -> ListingPage:
         """Return one page of the sorted, optionally filtered children of ``parent``.
 
         Arguments are validated before the adapter is called, so invalid input
         never reaches the adapter. Ordering is by ``(name, source_id, file_id)``.
         Filtering is a case-sensitive substring match applied before pagination.
+        ``max_entries`` is passed through to the adapter only when not ``None``,
+        so adapters and fakes without the keyword keep working. An
+        :class:`~drive_tool.storage.EnumerationLimitError` from the adapter
+        propagates unchanged.
         """
         # Validate everything first: bad arguments must not touch the adapter.
         _validate_limit(limit)
         _validate_offset(offset)
         _validate_name_contains(name_contains)
+        _validate_max_entries(max_entries)
 
         # Fresh listing each call; copy before sorting so the adapter's own
-        # return value is never mutated.
-        items = list(self._adapter.list_children(parent))
+        # return value is never mutated. Only pass max_entries when not None.
+        if max_entries is None:
+            items = list(self._adapter.list_children(parent))
+        else:
+            items = list(
+                self._adapter.list_children(parent, max_entries=max_entries)
+            )
         items.sort(key=lambda meta: (meta.name, meta.ref.source_id, meta.ref.file_id))
 
         if name_contains is not None:
