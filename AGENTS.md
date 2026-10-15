@@ -41,3 +41,5 @@ Dolesh explicitly leaves model/effort choice to Codex and notes Gemini3.8 is usa
 
 ## Role routing — latest user instruction
 Gemini owns design, architecture and security work. Sarvam and DeepSeek handle routine implementation, assembly, tests and focused non-architecture checks. Sarvam design drafts are input only; route final design/security decisions through Gemini and director acceptance.
+
+Efficiency routing: prefer DeepSeek for routine coding/fixes/focused checks; reserve Sarvam especially for internet/GitHub publishing, assembly/test execution and cloud evidence analysis. Gemini retains design/security. Parallelize only independent tasks across the two serialized browser hosts.
