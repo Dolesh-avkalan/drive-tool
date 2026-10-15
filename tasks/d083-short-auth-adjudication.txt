@@ -1,0 +1,207 @@
+D083 Gemini SHORT auth/schema adjudication retry (D075 relay failed before reply, no result). Static design/security only. Frozen backend has no public auth-only API. Adapter malformedJSON delegates to service.read(token,candidate_source_id,None); if source unextractable candidate_source_id=None. Actual backend authenticates token then authorize(agentid,None,op) returns denied, so even KNOWN token malformed JSON yields403denied, whereas tests expect400invalid. Unknown token must stay403; no FS IO/private policy access. Decide minimal safe observable contract for missing/unextractable source: accept uniform403denied (and correct erroneous tests with explicit justification) OR require a narrow public service authentication boundary if400 after valid token is essential. Do not invent API behavior. HugeContentLength10+digits classification/priority separately handled D080 (syntax first, lexical auth then cap); adjudicate400invalid vs413too_large bounded conversion/leadingzeros. Return precise adopted-proposal correction boundary/regression matrix, no implementation. Exact backend excerpts below; source in acceptedb7f8d17. Do not repeat fullHTTP audit. TESTS_NOT_RUN.>     def authenticate(self, token) -> AgentPolicy:
+          """Return the configured AgentPolicy matching a raw bearer token.
+  
+          Any failure (wrong type, wrong length, non-visible-ASCII char,
+          unknown token) raises the identical PolicyDeniedError so that
+          callers cannot distinguish reasons. The raw token is hashed
+          once and never stored on the instance.
+          """
+          if not isinstance(token, str):
+              raise PolicyDeniedError()
+          length = len(token)
+          if length < _TOKEN_MIN_LEN or length > _TOKEN_MAX_LEN:
+              raise PolicyDeniedError()
+          for ch in token:
+              cp = ord(ch)
+              if cp < _TOKEN_MIN_CP or cp > _TOKEN_MAX_CP:
+                  raise PolicyDeniedError()
+          try:
+              candidate = hashlib.sha256(token.encode('ascii')).digest()
+          except UnicodeEncodeError:
+              raise PolicyDeniedError() from None
+          match: AgentPolicy | None = None
+          for agent, stored in zip(self._agents, self._digests):
+              if hmac.compare_digest(candidate, stored):
+                  match = agent
+          if match is None:
+              raise PolicyDeniedError()
+          return match
+  
+>     def authorize(self, agent_id, source_alias, operation) -> SourceGrant:
+          """Return the exact configured grant for (agent, alias, operation).
+  
+          Trusted internal call after authentication. Never falls back to
+          another agent's grants and never reveals whether a source alias
+          exists elsewhere. Any denial raises the same PolicyDeniedError.
+          """
+          try:
+              if not isinstance(agent_id, str):
+                  raise PolicyDeniedError()
+              if not isinstance(source_alias, str):
+                  raise PolicyDeniedError()
+              if not isinstance(operation, str):
+                  raise PolicyDeniedError()
+              if operation not in OPERATIONS:
+                  raise PolicyDeniedError()
+              agent = self._by_id.get(agent_id)
+              if agent is None:
+                  raise PolicyDeniedError()
+              for grant in agent.grants:
+                  if grant.alias == source_alias:
+                      if operation in grant.operations:
+                          return grant
+                      raise PolicyDeniedError()
+              raise PolicyDeniedError()
+          except PolicyDeniedError:
+              raise
+          except Exception:
+              # Defensive: never leak KeyError/TypeError for arbitrary inputs.
+              raise PolicyDeniedError() from None
+BACKEND
+> def _parse_canonical_parts(file_id: Any, *, allow_root: bool) -> tuple[str, ...]:
+      if not isinstance(file_id, str):
+          _raise_service_error("invalid")
+      try:
+          parts = _parse_file_id(file_id)
+      except UnsafePathError:
+          _raise_service_error("denied")
+      except (LocalStorageError, StorageError, ValueError, TypeError):
+          _raise_service_error("invalid")
+  
+      if not isinstance(parts, tuple):
+          _raise_service_error("invalid")
+      if not parts and not allow_root:
+          _raise_service_error("invalid")
+      return parts
+  
+  
+  def _canonical_id(parts: tuple[str, ...]) -> str:
+      """Rebuild the canonical ``p/...`` FileRef id from parsed path parts.
+  
+      ``local._parse_file_id`` strips the ``p/`` prefix; every FileRef handed to
+      an adapter must carry the canonical ``p/...`` form again, so the service
+      never constructs a bare relative id the adapter would reject.
+      """
+      if not parts:
+          return ROOT_ID
+      return "p/" + "/".join(parts)
+  
+  def _serialize_metadata(meta: FileMetadata) -> dict[str, Any]:
+      return {
+          "ref": {
+              "source_id": meta.ref.source_id,
+              "file_id": meta.ref.file_id,
+          },
+          "name": meta.name,
+          "parent_id": meta.parent_id,
+          "kind": meta.kind,
+          "size_bytes": meta.size_bytes,
+      }
+  
+  def _translate_storage_exception(
+      exc: Exception,
+      *,
+      is_write_in_flight: bool,
+  ) -> ServiceError:
+      if isinstance(exc, ServiceError):
+          return exc
+  
+      if isinstance(exc, PolicyDeniedError):
+>     def _authenticate_and_authorize(
+          self,
+          token: Any,
+          source_id: Any,
+          operation: str,
+      ) -> tuple[AgentPolicy, SourceGrant]:
+          self._ensure_not_draining()
+          try:
+              agent = self._policy_table.authenticate(token)
+              grant = self._policy_table.authorize(agent.agent_id, source_id, operation)
+              return agent, grant
+          except PolicyDeniedError:
+              _raise_service_error("denied", outcome_uncertain=False, retry_safe=False)
+          except (TypeError, ValueError):
+              _raise_service_error("invalid", outcome_uncertain=False, retry_safe=False)
+  
+      def _acquire_binding_lease(self, agent_id: str, alias: str) -> _GrantBinding:
+          with self._cond:
+              if self._draining or self._closed:
+                  _raise_service_error(
+                      "unavailable",
+                      outcome_uncertain=False,
+                      retry_safe=True,
+                  )
+              binding = self._bindings.get((agent_id, alias))
+              if binding is None or binding.closed:
+                  _raise_service_error(
+                      "unavailable",
+                      outcome_uncertain=False,
+                      retry_safe=True,
+                  )
+              self._active_leases += 1
+              return binding
+  
+      def _release_binding_lease(self) -> None:
+          with self._cond:
+              self._active_leases -= 1
+              if self._active_leases <= 0:
+                  self._cond.notify_all()
+  
+      def close(self, *, timeout: float = 5.0) -> bool:
+          if (
+              type(timeout) is bool
+              or not isinstance(timeout, (int, float))
+              or math.isnan(float(timeout))
+              or float(timeout) < 0.0
+          ):
+              raise ValueError("timeout must be a non-negative number")
+  
+>     def read(
+          self,
+          token: str,
+          source_id: str,
+          file_id: str,
+          *,
+          offset: int = 0,
+          length: int = 262144,
+      ) -> RangeReadResult:
+          agent, grant = self._authenticate_and_authorize(token, source_id, "read")
+          parts = _parse_canonical_parts(file_id, allow_root=False)
+          canonical_id = _canonical_id(parts)
+  
+          checked_offset = _require_nonbool_int(offset)
+          if checked_offset < 0 or checked_offset > MAX_INT64:
+              _raise_service_error("invalid")
+  
+          checked_length = _require_nonbool_int(length)
+          if checked_length < 1:
+              _raise_service_error("invalid")
+          if checked_offset + checked_length > MAX_INT64:
+              _raise_service_error("invalid")
+  
+          read_cap = min(int(grant.max_read_bytes), SERVICE_MAX_READ_BYTES)
+          if checked_length > read_cap:
+              _raise_service_error("too_large")
+  
+          target_ref = FileRef(grant.alias, canonical_id)
+          binding = self._acquire_binding_lease(agent.agent_id, grant.alias)
+          try:
+              return binding.adapter.read_range(
+                  target_ref,
+                  offset=checked_offset,
+                  length=checked_length,
+              )
+          except (PolicyDeniedError, LocalStorageError, StorageError, OSError, ValueError) as exc:
+              raise _translate_storage_exception(exc, is_write_in_flight=False) from None
+          finally:
+              self._release_binding_lease()
+  
+      def save(
+          self,
+          token: str,
+          source_id: str,
+          file_id: str,
+          data: bytes,
+          *,
+          overwrite: bool = False,
+          create_parents: bool = True,
