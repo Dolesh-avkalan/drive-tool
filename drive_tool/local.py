@@ -66,8 +66,11 @@ from drive_tool.storage import (
     IsDirectoryError,
     NotDirectoryError,
     NotFoundError,
+    ScanBatch,
+    ScanFailure,
     SourceMismatchError,
     StorageError,
+    _validate_scan_max_entries,
 )
 
 __all__ = [
@@ -529,6 +532,44 @@ class LocalAdapter:
             raise LocalStorageError(
                 f"failed to close descriptor for {context}: {exc}"
             ) from exc
+
+    def _scan_work_error(
+        self, entry_count: int, message: str, exc: BaseException
+    ) -> StorageError:
+        """Build the error for a scan failure, charging already-yielded work.
+
+        Before any raw entry has been yielded the underlying storage error is
+        returned unchanged (zero raw work has been done). Once at least one raw
+        entry has been yielded the error is wrapped in :class:`ScanFailure`
+        carrying the number of successfully yielded raw entries, with the
+        original error and its ``OSError`` cause preserved.
+        """
+        underlying = LocalStorageError(message)
+        underlying.__cause__ = exc
+        if entry_count > 0:
+            return ScanFailure(entry_count, underlying)
+        return underlying
+
+    def _post_yield_storage_error(
+        self, entry_count: int, exc: StorageError
+    ) -> StorageError:
+        """Charge a post-yield ``StorageError`` from a metadata/stat seam.
+
+        Before any raw entry has been yielded the original error is returned
+        unchanged (zero raw work). After at least one raw entry, a plain
+        ``StorageError`` is wrapped in :class:`ScanFailure` carrying the consumed
+        raw count; an existing :class:`ScanFailure` is preserved without double
+        wrapping. This widens the *guaranteed* charged sources beyond the four
+        enumerated OS failures to any ``StorageError`` raised after a nonzero
+        prefix (robustness of the seam). It never converts a programming error,
+        ``KeyboardInterrupt`` or ``SystemExit`` -- which are not
+        ``StorageError`` -- into a storage success or partial result.
+        """
+        if isinstance(exc, ScanFailure):
+            return exc
+        if entry_count > 0:
+            return ScanFailure(entry_count, exc)
+        return exc
 
     # -- root initialization ---------------------------------------------------
 
@@ -1037,6 +1078,201 @@ class LocalAdapter:
 
         children.sort(key=lambda meta: meta.name)
         return children
+
+    def scan_children(
+        self, parent: FileRef, *, max_entries: int
+    ) -> ScanBatch:
+        """Return a bounded, no-lookahead scan of ``parent``'s raw entries.
+
+        ``max_entries`` (mandatory positive ``int``, ``bool`` rejected, at most
+        :data:`~drive_tool.storage.MAX_SCAN_ENTRIES`) bounds the number of raw
+        directory entries this scan will *yield*. Every yielded entry is counted
+        in ``inspected`` **before** any name filtering or stat, so invalid and
+        reserved names, writer temp files, symlinks, FIFOs/special entries, and
+        entries that vanish with ``ENOENT`` all count toward the budget. At most
+        ``max_entries`` entries are ever stat'ed.
+
+        The scan never asks the iterator for entry ``B + 1`` where ``B`` is
+        ``max_entries``: it stops the moment ``B`` raw entries have been
+        yielded. Consequently ``complete`` is ``True`` only when end-of-directory
+        was observed *within* the budget; a folder holding exactly ``B`` entries
+        reports ``complete=False`` (a deliberately conservative "unknown" -- the
+        end of the directory was never probed, and an unknown end is not proof
+        that another entry exists).
+
+        ``items`` holds only supported regular files and directories, sorted by
+        ``(name, file_id)`` within the scanned physical prefix only -- this is
+        not a claim about the global order of the directory, which POSIX
+        ``readdir`` does not provide.
+        """
+        root_fd = self._check_source_and_state(parent)
+        _validate_scan_max_entries(max_entries)
+        parts = _parse_file_id(parent.file_id)
+        dir_flags = _dir_open_flags()
+
+        # Descriptors are owned the moment they are acquired and released
+        # exactly once by the single ``finally`` below, which also covers the
+        # parent-close handoff and the scan.
+        owned: list[tuple[int, str]] = []
+        entry_count = 0
+        try:
+            if not parts:
+                try:
+                    scan_fd = self._os_open(".", dir_flags, dir_fd=root_fd)
+                except OSError as exc:
+                    raise LocalStorageError(
+                        f"failed to open root directory for scanning: {exc}"
+                    ) from exc
+            else:
+                parent_fd = self._traverse_parent_dir(
+                    root_fd, parts[:-1], parent.file_id
+                )
+                if parent_fd != root_fd:
+                    owned.append(
+                        (parent_fd, f"parent directory of {parent.file_id!r}")
+                    )
+                target_name = parts[-1]
+                try:
+                    scan_fd = self._os_open(
+                        target_name, dir_flags, dir_fd=parent_fd
+                    )
+                except OSError as exc:
+                    raise self._classify_component_open_error(
+                        target_name,
+                        parent_fd,
+                        exc,
+                        parent.file_id,
+                        is_intermediate=False,
+                        for_directory_op=True,
+                    ) from exc
+
+            owned.append((scan_fd, f"scan descriptor for {parent.file_id!r}"))
+
+            try:
+                dir_st = self._os_fstat(scan_fd)
+            except OSError as exc:
+                raise LocalStorageError(
+                    f"failed to fstat directory {parent.file_id!r}: {exc}"
+                ) from exc
+            if not stat.S_ISDIR(dir_st.st_mode):
+                if stat.S_ISLNK(dir_st.st_mode):
+                    raise UnsafePathError(
+                        f"entry {parent.file_id!r} is a symbolic link"
+                    )
+                if stat.S_ISREG(dir_st.st_mode):
+                    raise NotDirectoryError(
+                        f"entry {parent.file_id!r} is not a directory"
+                    )
+                raise UnsupportedEntryError(
+                    f"entry {parent.file_id!r} is not a supported directory"
+                )
+
+            try:
+                scandir_it = self._os_scandir(scan_fd)
+            except OSError as exc:
+                raise LocalStorageError(
+                    f"failed to scan directory {parent.file_id!r}: {exc}"
+                ) from exc
+
+            children: list[FileMetadata] = []
+            complete = True
+            with scandir_it as entries:
+                while entry_count < max_entries:
+                    try:
+                        entry = next(entries)
+                    except StopIteration:
+                        # End of directory observed within the budget.
+                        complete = True
+                        break
+                    except OSError as exc:
+                        raise self._scan_work_error(
+                            entry_count,
+                            f"failed to iterate directory {parent.file_id!r}: {exc}",
+                            exc,
+                        ) from exc
+                    # Count the raw entry before any filtering or stat.
+                    entry_count += 1
+                    name = entry.name
+                    if (
+                        name in ("", ".", "..")
+                        or "/" in name
+                        or "\\" in name
+                        or "\x00" in name
+                        or name.startswith(TEMP_PREFIX)
+                    ):
+                        continue
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                    except FileNotFoundError:
+                        # An entry vanishing concurrently is skipped, but counted.
+                        continue
+                    except OSError as exc:
+                        if exc.errno == errno.ENOENT:
+                            continue
+                        raise self._scan_work_error(
+                            entry_count,
+                            f"failed to inspect child {name!r} in "
+                            f"{parent.file_id!r}: {exc}",
+                            exc,
+                        ) from exc
+
+                    if stat.S_ISLNK(st.st_mode):
+                        continue
+                    if stat.S_ISDIR(st.st_mode):
+                        children.append(
+                            self._build_metadata(
+                                (*parts, name), kind="directory", size_bytes=None
+                            )
+                        )
+                    elif stat.S_ISREG(st.st_mode):
+                        children.append(
+                            self._build_metadata(
+                                (*parts, name),
+                                kind="file",
+                                size_bytes=st.st_size,
+                            )
+                        )
+                    # Special entries (FIFOs, sockets, device nodes) are omitted.
+                else:
+                    # The loop stopped because ``entry_count`` reached the budget
+                    # without ever probing for entry ``B + 1``: end-of-directory
+                    # is unknown, so this is conservatively incomplete.
+                    complete = False
+
+            children.sort(key=lambda meta: (meta.name, meta.ref.file_id))
+            return ScanBatch(
+                items=tuple(children),
+                inspected=entry_count,
+                complete=complete,
+            )
+        except OSError as exc:
+            # A readdir()/scandir iteration or iterator-close failure is
+            # surfaced with the raw work already done charged to it.
+            raise self._scan_work_error(
+                entry_count,
+                f"failed to iterate directory {parent.file_id!r}: {exc}",
+                exc,
+            ) from exc
+        except StorageError as exc:
+            # Any StorageError escaping the scan body (for example from the
+            # metadata or stat seam) after a nonzero prefix is charged the same
+            # way; an existing ScanFailure is preserved without double wrapping
+            # and a pre-yield error is left unchanged.
+            wrapped = self._post_yield_storage_error(entry_count, exc)
+            if wrapped is exc:
+                raise
+            raise wrapped from exc
+        finally:
+            try:
+                self._release_owned(owned)
+            except LocalStorageError as cleanup_exc:
+                # Reached only on the success path: while another exception is
+                # propagating ``_release_owned`` suppresses close failures so
+                # the primary error is never masked. No return happens before
+                # cleanup succeeds.
+                if entry_count > 0:
+                    raise ScanFailure(entry_count, cleanup_exc) from cleanup_exc
+                raise
 
     def read_bytes(self, ref: FileRef) -> bytes:
         """Read and return the bytes of regular file ``ref`` within bounds."""

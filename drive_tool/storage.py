@@ -9,14 +9,18 @@ Python 3.11+, standard library only. No network, no filesystem, no writes.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import Mapping, Protocol, runtime_checkable
 
 __all__ = [
     "FileRef",
     "FileMetadata",
+    "ScanBatch",
     "StorageAdapter",
     "StorageError",
+    "ScanFailure",
+    "ScanUnsupportedError",
     "SourceMismatchError",
     "NotFoundError",
     "NotDirectoryError",
@@ -26,10 +30,16 @@ __all__ = [
     "ReadOnlyError",
     "InMemoryAdapter",
     "ROOT_ID",
+    "MAX_SCAN_ENTRIES",
 ]
 
 #: The synthetic root directory id used by the in-memory adapter.
 ROOT_ID = "root"
+
+#: Public upper bound for a single :meth:`scan_children` budget. This mirrors
+#: the ``max_entries`` ceiling that :func:`drive_tool.search.find` accepts, so a
+#: scanner and a caller can never disagree about what "too large" means.
+MAX_SCAN_ENTRIES = 100_000
 
 @dataclass(frozen=True)
 class FileRef:
@@ -51,8 +61,64 @@ class FileMetadata:
     kind: str
     size_bytes: int | None
 
+@dataclass(frozen=True)
+class ScanBatch:
+    """The outcome of a bounded single-directory scan.
+
+    This is the return value of the optional ``scan_children`` adapter method.
+    It reports a *bounded physical prefix* of one directory's raw entries, not
+    a globally sorted snapshot of the directory.
+
+    Invariants:
+
+    - ``items`` holds only *supported* child entries (regular files and
+      directories), sorted by ``(name, file_id)`` **within the scanned physical
+      prefix only** -- not the globally sorted first ``inspected`` names.
+    - ``0 <= len(items) <= inspected``.
+    - ``inspected`` is the number of raw directory entries successfully yielded
+      by the scan before filtering, stat, or omission. It never exceeds the
+      ``max_entries`` budget passed to the scan.
+    - ``complete`` is ``True`` only when end-of-directory was observed within
+      the budget; ``False`` means the scan stopped at the budget without
+      probing for a further entry. ``complete=False`` is therefore a
+      conservative "unknown / possibly more" signal: an unknown end-of-directory
+      is not proof that another entry exists.
+    """
+
+    items: tuple[FileMetadata, ...]
+    inspected: int
+    complete: bool
+
 class StorageError(Exception):
     """Base class for all storage contract errors."""
+
+class ScanFailure(StorageError):
+    """A bounded directory scan failed after raw work had already been done.
+
+    ``inspected`` is the number of raw directory entries successfully yielded by
+    the scan before the failure (so partial scan work is never silently lost),
+    and ``error`` is the underlying :class:`StorageError` that caused it. The
+    original error is preserved as ``error`` and as the ``__cause__`` chain.
+
+    Failures that occur *before* any entry is yielded (for example opening the
+    directory) are ordinary storage errors and are not wrapped.
+    """
+
+    def __init__(self, inspected: int, error: StorageError) -> None:
+        self.inspected = inspected
+        self.error = error
+        super().__init__(
+            f"directory scan failed after inspecting {inspected} "
+            f"entr{'y' if inspected == 1 else 'ies'}: {error}"
+        )
+
+class ScanUnsupportedError(StorageError):
+    """Raised when a bounded directory scan is required but not supported.
+
+    ``find`` needs to bound *raw* scan work, which supported-item counts cannot
+    express, so an adapter without a callable ``scan_children`` cannot serve a
+    search. This is a hard capability requirement, not a fallback trigger.
+    """
 
 class SourceMismatchError(StorageError):
     """The reference's source_id does not match the adapter's source."""
@@ -146,6 +212,25 @@ def _validate_max_entries(max_entries: object) -> None:
     if max_entries < 1:
         raise ValueError(f"max_entries must be >= 1, got {max_entries}")
 
+
+def _validate_scan_max_entries(max_entries: object) -> None:
+    """Validate a mandatory ``scan_children`` budget.
+
+    ``max_entries`` is a required positive ``int`` in ``1..MAX_SCAN_ENTRIES``;
+    ``bool`` (including ``True``/``False``) and ``None`` are rejected.
+    """
+    if isinstance(max_entries, bool) or not isinstance(max_entries, int):
+        raise ValueError(
+            f"max_entries must be a positive int, "
+            f"got {type(max_entries).__name__}"
+        )
+    if max_entries < 1:
+        raise ValueError(f"max_entries must be >= 1, got {max_entries}")
+    if max_entries > MAX_SCAN_ENTRIES:
+        raise ValueError(
+            f"max_entries must be <= {MAX_SCAN_ENTRIES}, got {max_entries}"
+        )
+
 class InMemoryAdapter:
     """A read-only adapter over flat synthetic fixtures held in memory.
 
@@ -237,6 +322,36 @@ class InMemoryAdapter:
                     f"{max_entries} entries",
                 )
             return [self._file_metadata(name) for name in sorted(self._files)]
+        if parent.file_id not in self._files:
+            raise NotFoundError(f"unknown file_id {parent.file_id!r}")
+        raise NotDirectoryError(f"{parent.file_id!r} is not a directory")
+
+    def scan_children(self, parent: FileRef, *, max_entries: int) -> ScanBatch:
+        """Return a bounded, insertion-order prefix of the fixture children.
+
+        ``max_entries`` is a mandatory positive ``int``. The fixture mapping is
+        never sorted or fully materialized: at most ``max_entries`` names are
+        taken in insertion order (a bounded prefix), and only that prefix is
+        sorted by ``(name, file_id)``. Because the total length is known, an
+        in-memory scan reports exact completeness: ``complete=True`` when every
+        fixture entry fit in the prefix, ``complete=False`` otherwise.
+        """
+        self._check_source(parent)
+        _validate_scan_max_entries(max_entries)
+        if parent.file_id == ROOT_ID:
+            total = len(self._files)
+            prefix_names = list(itertools.islice(self._files, max_entries))
+            items = tuple(
+                sorted(
+                    (self._file_metadata(name) for name in prefix_names),
+                    key=lambda meta: (meta.name, meta.ref.file_id),
+                )
+            )
+            return ScanBatch(
+                items=items,
+                inspected=len(prefix_names),
+                complete=total <= max_entries,
+            )
         if parent.file_id not in self._files:
             raise NotFoundError(f"unknown file_id {parent.file_id!r}")
         raise NotDirectoryError(f"{parent.file_id!r} is not a directory")
