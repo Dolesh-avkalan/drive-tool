@@ -1,0 +1,594 @@
+"""Minimal loopback HTTP client for the Drive service wire contract (D047).
+
+This module implements a small, dependency-free caller for the four Drive
+service operations exposed over a loopback HTTP endpoint::
+
+    POST /v1/list
+    POST /v1/find
+    POST /v1/read
+    POST /v1/save
+
+Design constraints (director-owned wire contract, D047):
+
+* Host is always ``127.0.0.1`` and the transport is plain HTTP. There is no
+  TLS, no proxy support, no redirect following and no environment-based
+  transport configuration.
+* A fresh :class:`http.client.HTTPConnection` is created for every call and is
+  closed before the call returns. No live connection is retained between
+  calls, so there is no cross-request connection reuse.
+* ``timeout`` is an *inactivity / per-operation socket budget*, not a
+  guaranteed total wall-clock deadline. The client cannot promise hard
+  cancellation of an in-flight syscall or network operation; a slow peer may
+  keep a single socket read alive indefinitely as long as it keeps making
+  progress inside the budget.
+* The client never retries automatically. In particular it never retries a
+  ``save``; a caller must not assume a verify-then-retry loop is race-safe.
+* ``source_id`` and ``file_id`` are configured alias / canonical FileRef
+  identifiers, never host filesystem roots or absolute paths. The client only
+  validates *lexical wire fields*; the server adapter owns containment. The
+  ``source_id`` check is a convenience, not an authorization boundary.
+
+The module intentionally contains no filesystem access, no policy logic, no
+HTTP server, no CLI/config loader and no persistent session state.
+"""
+
+from __future__ import annotations
+
+import http.client
+import json
+import math
+import re
+from dataclasses import dataclass
+from typing import Any, Optional
+from urllib.parse import urlencode
+
+__all__ = ["DriveClient", "DriveClientError", "ReadReply"]
+
+_HOST = "127.0.0.1"
+
+#: Maximum byte length of a JSON control / success / error reply body.
+_MAX_JSON_BODY = 65536
+#: Maximum byte length of a single read window and of a save payload.
+_MAX_READ_LENGTH = 1048576
+_MAX_SAVE_BYTES = 1048576
+#: ``read`` must satisfy ``offset + length <= 2**63 - 1``.
+_MAX_OFFSET_SUM = 2**63 - 1
+
+_SOURCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_DECIMAL_RE = re.compile(r"^[0-9]+$")
+
+_KNOWN_CODES = frozenset(
+    {
+        "invalid",
+        "denied",
+        "not_found",
+        "exists",
+        "too_large",
+        "busy",
+        "unavailable",
+        "timeout",
+    }
+)
+
+_READ_CONTENT_TYPE = "application/octet-stream"
+
+
+class DriveClientError(Exception):
+    """Safe, redacted error raised for any remote or transport failure.
+
+    The exception exposes only three fixed local fields. Its ``str``/``repr``
+    never include the remote error message, the bearer token, the source root
+    or any response body.
+    """
+
+    __slots__ = ("code", "outcome_uncertain", "retry_safe")
+
+    def __init__(self, code: str, *, outcome_uncertain: bool, retry_safe: bool) -> None:
+        self.code = code
+        self.outcome_uncertain = bool(outcome_uncertain)
+        self.retry_safe = bool(retry_safe)
+        super().__init__("drive service error: %s" % (code,))
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial, exercised in tests
+        return (
+            "DriveClientError(code=%r, outcome_uncertain=%r, retry_safe=%r)"
+            % (self.code, self.outcome_uncertain, self.retry_safe)
+        )
+
+
+@dataclass(frozen=True)
+class ReadReply:
+    """Frozen result of a bounded ``read`` window.
+
+    ``offset``, ``observed_size`` and ``observed_mtime_ns`` are *observations*
+    captured by the server for this call; they are not a stable file version
+    or a snapshot guarantee. ``eof_observed`` is true only when the server
+    observed end-of-file at this window (a short window), never for a window
+    that exactly fills the requested length.
+    """
+
+    data: bytes
+    offset: int
+    observed_size: int
+    observed_mtime_ns: int
+    eof_observed: bool
+
+
+class _ProtocolError(Exception):
+    """Internal marker for a malformed/oversize/unexpected reply."""
+
+
+# ---------------------------------------------------------------------------
+# Lexical validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_source_id(source_id: Any) -> None:
+    if not isinstance(source_id, str):
+        raise TypeError("source_id must be a str")
+    if source_id == "":
+        raise ValueError("source_id must be non-empty")
+    if len(source_id) > 64:
+        raise ValueError("source_id must be at most 64 characters")
+    if _SOURCE_ID_RE.match(source_id) is None:
+        raise ValueError("source_id must match [A-Za-z0-9_-]+")
+
+
+def _validate_file_id(file_id: Any, *, allow_root: bool) -> None:
+    if not isinstance(file_id, str):
+        raise TypeError("file_id must be a str")
+    if file_id == "":
+        raise ValueError("file_id must be non-empty")
+    if "\x00" in file_id:
+        raise ValueError("file_id must not contain NUL")
+    if file_id == "root":
+        if not allow_root:
+            raise ValueError("file_id must not be 'root' for this operation")
+        return
+    if file_id.startswith("/"):
+        raise ValueError("file_id must be a relative POSIX path")
+    if "\\" in file_id:
+        raise ValueError("file_id must not contain a backslash")
+    for segment in file_id.split("/"):
+        if segment == "" or segment == "." or segment == "..":
+            raise ValueError("file_id contains an invalid path segment")
+
+
+def _validate_limit(limit: Any) -> None:
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise TypeError("limit must be an int")
+    if limit < 1 or limit > 100:
+        raise ValueError("limit must be in 1..100")
+
+
+def _validate_offset(offset: Any) -> None:
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise TypeError("offset must be an int")
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
+
+
+def _validate_read_length(length: Any) -> None:
+    if isinstance(length, bool) or not isinstance(length, int):
+        raise TypeError("length must be an int")
+    if length < 1 or length > _MAX_READ_LENGTH:
+        raise ValueError("length must be in 1..%d" % (_MAX_READ_LENGTH,))
+
+
+def _validate_max_entries(value: Any) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("max_entries must be an int")
+    if value < 1 or value > 100000:
+        raise ValueError("max_entries must be in 1..100000")
+
+
+def _validate_max_depth(value: Any) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("max_depth must be an int")
+    if value < 0 or value > 64:
+        raise ValueError("max_depth must be in 0..64")
+
+
+def _validate_name_contains(value: Any, *, required: bool) -> None:
+    if value is None:
+        if required:
+            raise TypeError("name_contains must be a str")
+        return
+    if not isinstance(value, str):
+        raise TypeError("name_contains must be a str")
+    if len(value) > 256:
+        raise ValueError("name_contains must be at most 256 characters")
+    if required and value == "":
+        raise ValueError("name_contains must be non-empty")
+
+
+# ---------------------------------------------------------------------------
+# Bounded reply reading
+# ---------------------------------------------------------------------------
+
+
+def _read_capped(resp: Any, cap: int) -> bytes:
+    """Read at most ``cap`` bytes, failing closed on anything larger.
+
+    A declared ``Content-Length`` above the cap fails before the body is read.
+    Missing or chunked responses are still bounded because at most ``cap + 1``
+    bytes are ever read, which is enough to detect excess without an unbounded
+    ``response.read()``.
+    """
+
+    declared = resp.getheader("Content-Length")
+    if declared is not None:
+        if _DECIMAL_RE.match(declared.strip()) is None:
+            raise _ProtocolError()
+        if int(declared, 10) > cap:
+            raise _ProtocolError()
+    data = resp.read(cap + 1)
+    if len(data) > cap:
+        raise _ProtocolError()
+    return data
+
+
+def _single_decimal_header(resp: Any, name: str) -> int:
+    values = resp.headers.get_all(name)
+    if not values or len(values) != 1:
+        raise _ProtocolError()
+    raw = values[0].strip()
+    if _DECIMAL_RE.match(raw) is None:
+        raise _ProtocolError()
+    return int(raw, 10)
+
+
+def _single_bool_header(resp: Any, name: str) -> bool:
+    values = resp.headers.get_all(name)
+    if not values or len(values) != 1:
+        raise _ProtocolError()
+    raw = values[0].strip().lower()
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    raise _ProtocolError()
+
+
+def _parse_success_json(raw: bytes) -> dict:
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise _ProtocolError()
+    if not isinstance(obj, dict) or obj.get("ok") is not True:
+        raise _ProtocolError()
+    result = obj.get("result")
+    if not isinstance(result, dict):
+        raise _ProtocolError()
+    return result
+
+
+def _parse_error_envelope(raw: bytes, *, write_op: bool) -> DriveClientError:
+    fallback = DriveClientError(
+        "unavailable",
+        outcome_uncertain=write_op,
+        retry_safe=not write_op,
+    )
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return fallback
+    if not isinstance(obj, dict) or obj.get("ok") is not False:
+        return fallback
+    error = obj.get("error")
+    if not isinstance(error, dict):
+        return fallback
+    code = error.get("code")
+    if not isinstance(code, str) or code not in _KNOWN_CODES:
+        return fallback
+    uncertain = error.get("outcome_uncertain")
+    retry_safe = error.get("retry_safe")
+    if not isinstance(uncertain, bool):
+        uncertain = write_op
+    if not isinstance(retry_safe, bool):
+        retry_safe = not write_op
+    return DriveClientError(code, outcome_uncertain=uncertain, retry_safe=retry_safe)
+
+
+def _wrap_transport(exc: BaseException, *, write_op: bool) -> DriveClientError:
+    code = "timeout" if isinstance(exc, TimeoutError) else "unavailable"
+    return DriveClientError(code, outcome_uncertain=write_op, retry_safe=not write_op)
+
+
+# ---------------------------------------------------------------------------
+# Client
+# ---------------------------------------------------------------------------
+
+
+class DriveClient:
+    """Loopback client for the four Drive service operations.
+
+    Constructor arguments are validated before any network activity. ``port``
+    and ``token`` are required keyword arguments; ``timeout`` defaults to 5.0
+    seconds and is an inactivity/operation socket budget.
+    """
+
+    def __init__(self, *, port: int, token: str, timeout: float = 5.0) -> None:
+        if isinstance(port, bool) or not isinstance(port, int):
+            raise TypeError("port must be an int")
+        if port < 1 or port > 65535:
+            raise ValueError("port must be in 1..65535")
+
+        if not isinstance(token, str):
+            raise TypeError("token must be a str")
+        if not 32 <= len(token) <= 256:
+            raise ValueError("token length must be in 32..256")
+        for ch in token:
+            code_point = ord(ch)
+            if code_point < 33 or code_point > 126:
+                raise ValueError(
+                    "token must contain only visible ASCII characters (33..126)"
+                )
+
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise TypeError("timeout must be an int or float")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be a positive finite number")
+
+        self._port = port
+        self._token = token
+        self._timeout = float(timeout)
+
+    def __repr__(self) -> str:
+        return (
+            "DriveClient(host=%r, port=%r, timeout=%r, token=<redacted>)"
+            % (_HOST, self._port, self._timeout)
+        )
+
+    # -- public operations --------------------------------------------------
+
+    def list(
+        self,
+        source_id: str,
+        file_id: str = "root",
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        name_contains: Optional[str] = None,
+    ) -> dict:
+        """POST /v1/list with JSON controls; return the result object."""
+
+        _validate_source_id(source_id)
+        _validate_file_id(file_id, allow_root=True)
+        _validate_limit(limit)
+        _validate_offset(offset)
+        _validate_name_contains(name_contains, required=False)
+
+        payload = {
+            "source_id": source_id,
+            "file_id": file_id,
+            "limit": limit,
+            "offset": offset,
+        }
+        if name_contains is not None:
+            payload["name_contains"] = name_contains
+        return self._dispatch_json("/v1/list", payload, write_op=False)
+
+    def find(
+        self,
+        source_id: str,
+        file_id: str = "root",
+        *,
+        name_contains: str,
+        limit: int = 20,
+        max_entries: int = 2000,
+        max_depth: int = 4,
+    ) -> dict:
+        """POST /v1/find with JSON controls; return the result object."""
+
+        _validate_source_id(source_id)
+        _validate_file_id(file_id, allow_root=True)
+        _validate_name_contains(name_contains, required=True)
+        _validate_limit(limit)
+        _validate_max_entries(max_entries)
+        _validate_max_depth(max_depth)
+
+        payload = {
+            "source_id": source_id,
+            "file_id": file_id,
+            "name_contains": name_contains,
+            "limit": limit,
+            "max_entries": max_entries,
+            "max_depth": max_depth,
+        }
+        return self._dispatch_json("/v1/find", payload, write_op=False)
+
+    def read(
+        self,
+        source_id: str,
+        file_id: str,
+        *,
+        offset: int = 0,
+        length: int = 262144,
+    ) -> ReadReply:
+        """POST /v1/read with JSON controls; return a frozen :class:`ReadReply`."""
+
+        _validate_source_id(source_id)
+        _validate_file_id(file_id, allow_root=False)
+        _validate_offset(offset)
+        _validate_read_length(length)
+        if offset + length > _MAX_OFFSET_SUM:
+            raise ValueError("offset + length must be <= 2**63 - 1")
+
+        payload = {
+            "source_id": source_id,
+            "file_id": file_id,
+            "offset": offset,
+            "length": length,
+        }
+        body = _encode_json(payload)
+        return self._dispatch(
+            "/v1/read",
+            body,
+            content_type="application/json",
+            cap=length,
+            mode="read",
+            write_op=False,
+            request_offset=offset,
+            request_length=length,
+        )
+
+    def save(
+        self,
+        source_id: str,
+        file_id: str,
+        data: bytes,
+        *,
+        overwrite: bool = False,
+        create_parents: bool = True,
+    ) -> dict:
+        """POST /v1/save with a raw octet-stream body; return the result object."""
+
+        _validate_source_id(source_id)
+        _validate_file_id(file_id, allow_root=False)
+        if not isinstance(data, bytes):
+            raise TypeError("data must be bytes")
+        if len(data) > _MAX_SAVE_BYTES:
+            raise ValueError("data must be at most %d bytes" % (_MAX_SAVE_BYTES,))
+        if not isinstance(overwrite, bool):
+            raise TypeError("overwrite must be a bool")
+        if not isinstance(create_parents, bool):
+            raise TypeError("create_parents must be a bool")
+
+        query = urlencode(
+            {
+                "source_id": source_id,
+                "file_id": file_id,
+                "overwrite": "true" if overwrite else "false",
+                "create_parents": "true" if create_parents else "false",
+            }
+        )
+        return self._dispatch(
+            "/v1/save?" + query,
+            data,
+            content_type=_READ_CONTENT_TYPE,
+            cap=_MAX_JSON_BODY,
+            mode="json",
+            write_op=True,
+        )
+
+    # -- transport seam -----------------------------------------------------
+
+    def _open(self) -> http.client.HTTPConnection:
+        """Create a fresh connection. Overridable seam for controlled tests."""
+
+        return http.client.HTTPConnection(_HOST, self._port, timeout=self._timeout)
+
+    # -- internals ----------------------------------------------------------
+
+    def _dispatch_json(self, path: str, payload: dict, *, write_op: bool) -> dict:
+        return self._dispatch(
+            path,
+            _encode_json(payload),
+            content_type="application/json",
+            cap=_MAX_JSON_BODY,
+            mode="json",
+            write_op=write_op,
+        )
+
+    def _dispatch(
+        self,
+        path: str,
+        body: bytes,
+        *,
+        content_type: str,
+        cap: int,
+        mode: str,
+        write_op: bool,
+        request_offset: int = 0,
+        request_length: int = 0,
+    ) -> Any:
+        try:
+            conn = self._open()
+        except Exception as exc:  # noqa: BLE001 - mapped to a safe local error
+            raise _wrap_transport(exc, write_op=write_op) from None
+
+        resp = None
+        try:
+            try:
+                conn.request(
+                    "POST",
+                    path,
+                    body=body,
+                    headers={
+                        "Content-Type": content_type,
+                        "Content-Length": str(len(body)),
+                        "Authorization": "Bearer " + self._token,
+                        "Connection": "close",
+                    },
+                )
+                resp = conn.getresponse()
+            except Exception as exc:  # noqa: BLE001 - mapped to a safe local error
+                raise _wrap_transport(exc, write_op=write_op) from None
+
+            status = resp.status
+            if status == 200:
+                raw = _read_capped(resp, cap)
+                if mode == "read":
+                    return _build_read_reply(
+                        resp, raw, request_offset, request_length
+                    )
+                return _parse_success_json(raw)
+
+            raw = _read_capped(resp, _MAX_JSON_BODY)
+            raise _parse_error_envelope(raw, write_op=write_op)
+        except _ProtocolError:
+            raise DriveClientError(
+                "unavailable", outcome_uncertain=write_op, retry_safe=not write_op
+            ) from None
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:  # noqa: BLE001 - best-effort cleanup
+                    pass
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+
+
+def _encode_json(payload: dict) -> bytes:
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _build_read_reply(
+    resp: Any, raw: bytes, request_offset: int, request_length: int
+) -> ReadReply:
+    content_type = resp.getheader("Content-Type")
+    if (
+        content_type is None
+        or content_type.split(";", 1)[0].strip().lower() != _READ_CONTENT_TYPE
+    ):
+        raise _ProtocolError()
+
+    offset = _single_decimal_header(resp, "X-Drive-Offset")
+    observed_size = _single_decimal_header(resp, "X-Drive-Observed-Size")
+    observed_mtime_ns = _single_decimal_header(resp, "X-Drive-Observed-Mtime-Ns")
+    eof_observed = _single_bool_header(resp, "X-Drive-EOF-Observed")
+
+    if offset != request_offset:
+        raise _ProtocolError()
+
+    received = len(raw)
+    if received > request_length:
+        raise _ProtocolError()
+    # A short window is only legal when EOF was actually observed; a window
+    # that exactly fills the request is never an EOF observation.
+    if received < request_length and not eof_observed:
+        raise _ProtocolError()
+    if received == request_length and eof_observed:
+        raise _ProtocolError()
+
+    return ReadReply(
+        data=raw,
+        offset=offset,
+        observed_size=observed_size,
+        observed_mtime_ns=observed_mtime_ns,
+        eof_observed=eof_observed,
+    )
