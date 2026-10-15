@@ -21,6 +21,7 @@ __all__ = [
     "NotFoundError",
     "NotDirectoryError",
     "IsDirectoryError",
+    "EnumerationLimitError",
     "InMemoryAdapter",
     "ROOT_ID",
 ]
@@ -28,14 +29,12 @@ __all__ = [
 #: The synthetic root directory id used by the in-memory adapter.
 ROOT_ID = "root"
 
-
 @dataclass(frozen=True)
 class FileRef:
     """An opaque reference to a file (or the synthetic root) in a source."""
 
     source_id: str
     file_id: str
-
 
 @dataclass(frozen=True)
 class FileMetadata:
@@ -50,26 +49,32 @@ class FileMetadata:
     kind: str
     size_bytes: int | None
 
-
 class StorageError(Exception):
     """Base class for all storage contract errors."""
-
 
 class SourceMismatchError(StorageError):
     """The reference's source_id does not match the adapter's source."""
 
-
 class NotFoundError(StorageError):
     """The referenced file_id is unknown to this adapter."""
-
 
 class NotDirectoryError(StorageError):
     """A directory-only operation was requested on a non-directory."""
 
-
 class IsDirectoryError(StorageError):
     """A file-only operation was requested on a directory."""
 
+class EnumerationLimitError(StorageError):
+    """A directory enumeration exceeded its configured entry limit.
+
+    ``limit`` is the configured maximum that was exceeded.
+    """
+
+    def __init__(self, limit: int, message: str | None = None) -> None:
+        self.limit = limit
+        super().__init__(
+            message or f"directory entry count exceeded limit of {limit}"
+        )
 
 @runtime_checkable
 class StorageAdapter(Protocol):
@@ -86,18 +91,23 @@ class StorageAdapter(Protocol):
         """Return metadata for ``ref``."""
         ...
 
-    def list_children(self, parent: FileRef) -> list[FileMetadata]:
-        """Return metadata for the direct children of directory ``parent``."""
+    def list_children(
+        self, parent: FileRef, *, max_entries: int | None = None
+    ) -> list[FileMetadata]:
+        """Return metadata for the direct children of directory ``parent``.
+
+        When ``max_entries`` is not ``None`` it is an upper bound on the
+        number of directory entries examined; adapters may raise
+        :class:`EnumerationLimitError` when the directory holds more.
+        """
         ...
 
     def read_bytes(self, ref: FileRef) -> bytes:
         """Return the exact bytes stored for file ``ref``."""
         ...
 
-
 _INVALID_FILENAME_TOKENS = (".", "..", ROOT_ID)
 _INVALID_FILENAME_CHARS = ("/", "\\", "\x00")
-
 
 def _validate_filename(name: object) -> str:
     """Validate a fixture filename, returning it if valid.
@@ -116,6 +126,17 @@ def _validate_filename(name: object) -> str:
             raise ValueError(f"filename {name!r} must not contain {char!r}")
     return name
 
+def _validate_max_entries(max_entries: object) -> None:
+    """Validate an optional ``max_entries``: ``None`` or ``int >= 1``."""
+    if max_entries is None:
+        return
+    if isinstance(max_entries, bool) or not isinstance(max_entries, int):
+        raise ValueError(
+            f"max_entries must be a positive int or None, "
+            f"got {type(max_entries).__name__}"
+        )
+    if max_entries < 1:
+        raise ValueError(f"max_entries must be >= 1, got {max_entries}")
 
 class InMemoryAdapter:
     """A read-only adapter over flat synthetic fixtures held in memory.
@@ -195,9 +216,18 @@ class InMemoryAdapter:
             raise NotFoundError(f"unknown file_id {ref.file_id!r}")
         return self._file_metadata(ref.file_id)
 
-    def list_children(self, parent: FileRef) -> list[FileMetadata]:
+    def list_children(
+        self, parent: FileRef, *, max_entries: int | None = None
+    ) -> list[FileMetadata]:
         self._check_source(parent)
+        _validate_max_entries(max_entries)
         if parent.file_id == ROOT_ID:
+            if max_entries is not None and len(self._files) > max_entries:
+                raise EnumerationLimitError(
+                    max_entries,
+                    f"directory {parent.file_id!r} exceeds limit of "
+                    f"{max_entries} entries",
+                )
             return [self._file_metadata(name) for name in sorted(self._files)]
         if parent.file_id not in self._files:
             raise NotFoundError(f"unknown file_id {parent.file_id!r}")
