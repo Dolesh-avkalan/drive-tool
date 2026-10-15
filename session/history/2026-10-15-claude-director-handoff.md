@@ -4,6 +4,13 @@ Dolesh asked Claude (a cloud Claude Code session) to direct drive-tool today and
 when he left the office. This note is what Codex needs to continue. Everything below was checked
 against git, the relay bus and the drop repo unless marked "reported".
 
+## Update 14:20 UTC
+
+The MODULE-005 chain ran to the end while Claude's session was still alive: d025-d030 done, accepted as
+D018 (see DECISIONS.md and PROGRESS.md), PR https://github.com/Dolesh-avkalan/drive-tool/pull/3 open. No relay task
+is pending on browser-bus. Next director step: get Dolesh's merge, then design the partial-listing module and
+MODULE-006. The rest of this note is still accurate as procedure.
+
 ## State in one paragraph
 
 main = af42edb + session/spec commits: read-only core (MODULE-001..003) and MODULE-004 (bounded
@@ -28,7 +35,7 @@ the README milestones (local core ~60%: writes and the agent service are missing
   (design review, code review), DeepSeek = code and tests, Sarvam = routine assembly, test runs,
   mutation checks, pushes, evidence.
 
-## MODULE-005 chain: what to do next
+## MODULE-005 chain (update 14:20 UTC: finished, accepted as D018, PR #3 awaiting Dolesh)
 
 | Task | Agent | State at handoff | Output (drop repo) |
 |---|---|---|---|

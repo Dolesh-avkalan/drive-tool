@@ -85,3 +85,19 @@ one test-fixture path fix in 2bb2c3a); independent director execution 175/175 on
 independent mutation check (6 targeted mutations, each caught by its proof test), matching Sarvam's table.
 Known design gap, deferred to a later module: find() in a folder larger than its entry budget returns no
 items (listing is all-or-nothing). Merge into main only with Dolesh's approval.
+
+## D018 — MODULE-005 accepted at a65da4e (2026-10-15)
+
+Director acceptance of feature/module-005-local-write at a65da4e: LocalWriter (write_bytes with temp file +
+fsync + atomic no-replace link publish, overwrite via rename only onto a regular file; mkdir), temp files
+hidden from listings, AlreadyExistsError/ReadOnlyError in storage.py. Basis: Argon security/code review
+ACCEPT WITH NITS (d028, no blocking findings), nits closed (d029 DeepSeek proof tests + 2 small code edits,
+d030 Sarvam, 8 mutations all caught); independent director run 204/204 on Python 3.13.16, director mutation
+checks (link->rename, no temp cleanup, no O_NOFOLLOW, no temp filter, no parent fsync, no O_CLOEXEC, short temp
+name, cleanup-flag order: all caught; one surviving mutation is an unreachable defensive branch), adversarial
+probes (symlinked parent refused and outside dir untouched; 20 concurrent writers -> exactly 1 winner, 19
+AlreadyExistsError, winner's exact bytes; 4 s folder<->symlink swap race: 549 writes, 0 outside; no temp files
+or descriptors left). Rule decided: with overwrite=False, if the parent-directory fsync fails after the link has
+published the file, the error stands (durability not confirmed) and the file stays; a retry gets
+AlreadyExistsError. Request-id idempotency for that case belongs to the service layer (MODULE-006). Merge only
+with Dolesh's approval.

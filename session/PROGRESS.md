@@ -196,3 +196,12 @@ Dolesh merged PR #2 (MODULE-004) as af42edb. Brief tasks/MODULE-005.md (safe loc
 atomic no-replace publish via link, overwrite via rename, temp files hidden from listings, mkdir). Relay chain:
 d025 Argon design review, d026 DeepSeek implementation (Argon's recommendations pre-accepted unless they weaken a
 security rule), d027 Sarvam assemble/test/mutation-check/push (held for director check), d028 Argon code review.
+
+## 2026-10-15 — MODULE-005 built, reviewed, accepted (D018)
+
+d025 Argon design review (8 rules, adopted); d026 DeepSeek implementation (relay pressed DeepSeek's Continue
+once automatically: 20,675 -> 61,602 chars); d027 Sarvam: 15da7d4 (DeepSeek code, byte-identical), two test-only
+"Sarvam fixes" (5b5de3f read limit for the 10 MiB read-back; 5fcc225 fsync-failure expectation), dda193b
+evidence; 199 OK on 3.11.2/3.12.13; 5 mutations caught. d028 Argon: ACCEPT WITH NITS (5 nits). d029 DeepSeek
+proof tests + 2 edits; d030 Sarvam bab5117/1dcfeef/a65da4e, 204 OK, 8 mutations caught. Director verification
+and probes in D018. PR to main opened.
