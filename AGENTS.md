@@ -43,3 +43,5 @@ Dolesh explicitly leaves model/effort choice to Codex and notes Gemini3.8 is usa
 Gemini owns design, architecture and security work. Sarvam and DeepSeek handle routine implementation, assembly, tests and focused non-architecture checks. Sarvam design drafts are input only; route final design/security decisions through Gemini and director acceptance.
 
 Efficiency routing: prefer DeepSeek for routine coding/fixes/focused checks; reserve Sarvam especially for internet/GitHub publishing, assembly/test execution and cloud evidence analysis. Gemini retains design/security. Parallelize only independent tasks across the two serialized browser hosts.
+
+Latest routing refinement: DeepSeek is first choice for routine implementation/fixes while available. Prefer Sarvam for short scoped assignments, internet/GitHub-dependent tasks, and routine fallback when DeepSeek hits limits. Keep Sarvam assignments small; split assembly/publication/execution stages when useful. Gemini owns architecture/design/security. This supersedes any broader default to Sarvam for routine coding.
