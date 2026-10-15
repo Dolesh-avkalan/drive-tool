@@ -47,3 +47,5 @@ Efficiency routing: prefer DeepSeek for routine coding/fixes/focused checks; res
 Latest routing refinement: DeepSeek is first choice for routine implementation/fixes while available. Prefer Sarvam for short scoped assignments, internet/GitHub-dependent tasks, and routine fallback when DeepSeek hits limits. Keep Sarvam assignments small; split assembly/publication/execution stages when useful. Gemini owns architecture/design/security. This supersedes any broader default to Sarvam for routine coding.
 
 Sarvam is also suitable for work whose turnaround time is not important, including independent background verification and long evidence runs when these do not block the critical path.
+
+Sarvam subagents: user explicitly authorizes Sarvam to spawn subagents when useful for independent, non-overlapping implementation/test/retrieval work. Parent retains exact pins/scope, verifies raw results and publication; no duplicate live tasks, competing selected-tab actions, secret sharing or authority expansion. Prefer small bounded delegations; do not spawn merely to keep busy.
