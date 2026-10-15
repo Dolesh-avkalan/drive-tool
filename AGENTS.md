@@ -38,3 +38,6 @@ Dolesh explicitly instructed: "dont ask me to merge ... if you are confident, th
 ## Model/effort selection — 2026-10-15 (D030)
 
 Dolesh explicitly leaves model/effort choice to Codex and notes Gemini3.8 is usable and Argon High is not required for every assignment. Match capability/effort to the task: routine assembly, tests, straightforward fixes and drafting use capable available lighter models or lower effort; reserve Argon/high for difficult architecture, security/authorization and adversarial reviews. Verify actual picker selection/availability, keep provenance, never silently downgrade an explicitly pinned review or invent unsupported effort choices. This supersedes any blanket preference to use4argon/high on every Gemini task. No quality gates are removed.
+
+## Role routing — latest user instruction
+Gemini owns design, architecture and security work. Sarvam and DeepSeek handle routine implementation, assembly, tests and focused non-architecture checks. Sarvam design drafts are input only; route final design/security decisions through Gemini and director acceptance.
