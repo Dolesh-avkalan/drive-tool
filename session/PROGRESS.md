@@ -357,3 +357,5 @@ User local completion collection: D064 actual answer incomplete (baseline only, 
 User routing refinement: DeepSeek primary routine implementer; Sarvam short scoped/internet-dependent work and fallback when DeepSeek limited. Persisted in AGENTS; current D067 test task remains isolated, no duplicate redispatch.
 
 Gemini completion collected: D065 static baseline CHANGES REQUIRED with three concrete containment/identity/order issues and separate disposable fault-test design. Routed precise correction to DeepSeek D069, no deployment/target acceptance claim. Keep harsh-test extension staged behind runner corrections.
+
+DeepSeek completion: collected D066 actual patch (not HTTP yet), TESTS_NOT_RUN. Queued short Sarvam D070 assembly/verification while DeepSeek D068/D069 remain queued/active and local D067 test authoring active. Strict counts/mutation preserved.
