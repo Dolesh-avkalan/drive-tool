@@ -22,6 +22,8 @@ __all__ = [
     "NotDirectoryError",
     "IsDirectoryError",
     "EnumerationLimitError",
+    "AlreadyExistsError",
+    "ReadOnlyError",
     "InMemoryAdapter",
     "ROOT_ID",
 ]
@@ -75,6 +77,12 @@ class EnumerationLimitError(StorageError):
         super().__init__(
             message or f"directory entry count exceeded limit of {limit}"
         )
+
+class AlreadyExistsError(StorageError):
+    """A create-only operation found the target name already present."""
+
+class ReadOnlyError(StorageError):
+    """A mutating operation was attempted on a read-only storage source."""
 
 @runtime_checkable
 class StorageAdapter(Protocol):
