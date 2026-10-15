@@ -29,4 +29,5 @@ Owner plans a cloud-box test after confidence in local worker artifacts. Prepare
 
 ## Integration control
 
-Codex owns acceptance and integration decisions. Browser workers implement, assemble and execute. No implementation merge or deployment without the owner's approval of a concrete candidate. Session checkpoint/specification commits may preserve progress without merging implementation. Keep main, accepted artifacts and release claims distinct.
+Codex owns acceptance and integration decisions. Browser workers implement, assemble and execute. Update D025 (2026-10-15): Dolesh granted standing authorization for Codex to merge implementation PRs once the applicable review/test/acceptance gates pass; do not ask for per-PR approval. Verify the exact candidate head when merging and report the result. Deployment still requires its applicable authorization. This supersedes the previous concrete-candidate per-merge approval requirement. Session checkpoint/specification commits may preserve progress without merging implementation. Keep main, accepted artifacts and release claims distinct.
+

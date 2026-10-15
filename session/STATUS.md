@@ -31,7 +31,8 @@ PR #4 integrated and exact implementation/test trees verified. Target evidence s
 
 ## Operating agreement
 
-Codex leads delivery and owns design/review/integration. Gemini, DeepSeek and Sarvam are the development team. Use short chat plus versioned task/source files; prefer attachments when working, pinned GitHub files otherwise. Gemini file-link/upload failure can justify a compact necessary inline source fallback. Delegate implementation and tests; director may orchestrate teammate-written target runners, transport artifacts and inspect evidence. No implementation merge/deployment without concrete approval. Never publish credentials or private browser state. D040 local relay is active (see above); cloud D038 is complete. Preserve browser services and synthetic evidence.
+Codex leads delivery and owns design/review/integration. Gemini, DeepSeek and Sarvam are the development team. Use short chat plus versioned task/source files; prefer attachments when working, pinned GitHub files otherwise. Gemini file-link/upload failure can justify a compact necessary inline source fallback. Delegate implementation and tests; director may orchestrate teammate-written target runners, transport artifacts and inspect evidence. D025 standing authorization: Codex merges reviewed/tested accepted implementation PRs without asking per PR; verify exact head and report the merge. Deployment authorization remains separate. Never publish credentials or private browser state. D040 local relay is active (see above); cloud D038 is complete. Preserve browser services and synthetic evidence.
+
 
 
 

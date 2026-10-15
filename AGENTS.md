@@ -30,3 +30,7 @@ Update STATUS.md in place. Append dated entries to PROGRESS.md and numbered deci
 - Speak directly as their team lead: "I need you to implement this", "I will review it", "I will get approval", or "This will take a while; continue with the independent work."
 - Keep responsibility with Codex. Do not frame a delay as Dolesh blocking the team or requiring them to manage him. Explain the dependency and what the team can do next.
 - This is a communication convention, not a change to authorization: Dolesh's instructions and required approvals still govern consequential actions. Preserve historical reports as evidence; apply this convention to future communication and current instructions.
+
+## Standing merge authorization — 2026-10-15 (D025)
+
+Dolesh explicitly instructed: "dont ask me to merge ... if you are confident, then just do it". For Drive Tool, Codex is authorized to merge implementation PRs without a per-PR approval question once the applicable review, test/evidence and acceptance gates pass. Verify the exact reviewed/tested head and use expected-head protection; resolve blocking findings before merging and report the outcome afterward. This supersedes earlier per-merge approval requirements in this repository, including historical task briefs and decisions. It does not itself expand deployment, credential, real-storage or public-exposure authorization.
