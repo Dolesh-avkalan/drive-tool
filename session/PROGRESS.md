@@ -361,3 +361,5 @@ Gemini completion collected: D065 static baseline CHANGES REQUIRED with three co
 DeepSeek completion: collected D066 actual patch (not HTTP yet), TESTS_NOT_RUN. Queued short Sarvam D070 assembly/verification while DeepSeek D068/D069 remain queued/active and local D067 test authoring active. Strict counts/mutation preserved.
 
 DeepSeek completion collected actual D068 HTTP adapter generated source (not tested). Queued short Sarvam exact source assembly D071, no rewrites. Local D067 conformance tests still pending. No HTTP acceptance claim, security/execution gates retained.
+
+DeepSeek finished D069 runner fixes (generated only). Queued D072 Sarvam assembly/meaningful negative-gate execution, no deployment/target claim. Current HTTP generated code D068 awaits D071 publication and D067 tests; accepted source unchanged.
