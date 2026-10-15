@@ -1,3 +1,12 @@
+# Latest milestone — agent interface design and core quality review, 2026-10-15 Asia/Calcutta
+
+Director review of main (d510661): the read-only core is a sound foundation (140/140 tests,
+symlink/race/containment probes held; details in PROGRESS.md). Agent-layer design adopted as
+D016 in session/AGENT-INTERFACE.md: light, stateless, 5 tools, short replies, per-agent caps,
+for about 6 agents using it all day. Next: MODULE-004 bounded enumeration (listing still
+materializes whole folders: 2.0 s for a 10-item page over 200,000 files), then MODULE-005
+save, MODULE-006 service, then a 6-agent soak test. No tasks dispatched yet for these.
+
 # Latest milestone — read-only core merged into main, 2026-10-15 Asia/Calcutta
 
 Supersedes "no implementation merge" statements below. Dolesh approved and performed the merge

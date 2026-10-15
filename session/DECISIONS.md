@@ -65,3 +65,13 @@ preserves worker history. Feature branches remain as historical evidence. The me
 baseline only; deployment, agent-facing listing (needs an enumeration budget), Google Drive,
 writes and the API remain separate gated work. Supersedes the "separate feature branches, not
 merged" boundary in CORE-ACCEPTANCE.md.
+
+## D016 — Light, reliable agent interface; quality review findings (2026-10-15)
+
+Dolesh's requirement: about 6 agents use the tool all day at random times; it must be a light,
+solid, boring routine and must not cost agents many tokens to get or save files. Adopted the
+design in session/AGENT-INTERFACE.md: at most 5 tools, one call per normal action, short
+replies and a fixed error-code set, stateless calls, adapters held open for the service
+lifetime, per-agent caps and deadlines, scan-time enumeration budgets, atomic no-overwrite
+saves, and a 6-agent soak test as the rollout gate. Module order: MODULE-004 bounded
+enumeration, MODULE-005 save, MODULE-006 service, then soak. Google Drive follows.

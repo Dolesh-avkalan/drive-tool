@@ -129,3 +129,21 @@ commit a709f0d. Claude Code verified from git that the candidate is in main and 
 and tests/ match 99e1025 exactly (the revision validated with 140 tests on the cloud target and
 on Python 3.11/3.12). Pre-merge trial merge: no conflicts, 15 files added, nothing existing
 changed. No tests executed by the director; no deployment.
+
+## 2026-10-15 — Director quality review of merged core (d510661)
+
+Independent director execution (Claude Code cloud container, Linux 6.18, Python 3.13.16, run
+as root so permission-denied paths were not exercised): 140/140 tests OK. Branch coverage:
+listing.py 100%, storage.py 98%, local.py 81% (uncovered lines are mostly OS-error
+classification paths). Own adversarial probes against main: symlink folder/file/root,
+`..`, device node and intermediate device all refused; 4 s folder<->symlink swap race:
+1,683 successful reads, 0 outside-content leaks; root rename keeps the anchored root; odd
+names (`root`, non-UTF-8) round-trip. Measured: a 10-item page over a 200,000-file folder
+took 2.0 s (76 MB peak under tracemalloc), confirming the enumeration-budget gate.
+Findings for the next modules: unbounded listing; close() during in-flight calls can reuse
+the root descriptor number (service must not close adapters while running); untested error
+mapping; the O_NOFOLLOW probe runs on the temp filesystem, not the root's (matters for
+WSL /mnt/c or FUSE); silent omission of symlinks/special/backslash names in listings;
+1,089-line adapter with duplicated helpers; FileMetadata lacks README's modified_at and
+checksum. Verdict: sound read-only foundation. Design for the agent layer recorded as D016,
+session/AGENT-INTERFACE.md.
