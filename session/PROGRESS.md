@@ -345,3 +345,5 @@ Completion collection: backend independent D058 ACCEPT with published14729120; G
 2026-10-16: User authorized separate stress box; connected through existing GCP Cloud Shell credentials and gcloud SSH, confirmed target prompt/specs. No credentials exposed or service deployed; future bounded synthetic runner can use this existing session after local gates.
 
 2026-10-16: User requests Sarvam cloud execution through GitHub. Inspected historical D014/D038 actual mechanism; dispatched D063 Sarvam-owned pinned runner and bounded stress/edge evidence loop on cloud browser queue. No credentials in GitHub or arbitrary remote-shell bridge. Target execution pending runner review, HTTP gate pending accepted adapter.
+
+Current user live-status check: collected complete D061 revision, adopted bounded contract with explicit director overrides on TCP best effort, no future pipelining guarantee, absolute deadlines/close/parser bounds. Dispatched local Sarvam D064 HTTP implementation while cloud D063 runner remains pending. Two distinct assigned tracks; no implementation/tests handwritten by director.
