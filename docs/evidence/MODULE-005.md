@@ -265,13 +265,22 @@ execution of that round: the commit, the run on both interpreters, and the
 mutation check of the mutations d029 lists plus the five additional mutations
 named in the task.
 
-### 9.1 Commit
+### 9.1 Commits
 
 | # | Commit | Message |
 | --- | --- | --- |
-| 5 | `2df3cc0a7cfe35fd327bd4c0df9da28d19b4ed18` | Close MODULE-005 review nits: proof tests and cleanup order (DeepSeek) |
+| 5 | `bab51174d9dccce3596fb0aa824a47f8f86536d4` | Close MODULE-005 review nits: proof tests and cleanup order (DeepSeek) |
+| 6 | `1dcfeefb6787829274a55e0220986c2de5d30d95` | Add MODULE-005 review-nits evidence: proof tests, run and mutation check (Sarvam) |
+| 7 | this commit | Record the pushed commit ids in MODULE-005 review-nits evidence (Sarvam) |
 
-Parent of commit 5 is commit 4 (`dda193b`, the previous tip of this branch).
+Parent of commit 5 is commit 4 (`dda193b`, the previous tip of this branch);
+commit 6's parent is commit 5, and commit 7's parent is commit 6.
+
+Commit 5 and commit 6 were pushed through the GitHub Git Data API (the sandbox
+holds no push credentials). The API stores the commit message without a trailing
+newline, so the pushed SHAs differ from the byte-identical local commits; the
+SHAs above are the ones that are actually on the branch. All three files were
+verified byte-for-byte against the pushed tree.
 
 Commit 5 changes exactly two paths:
 
