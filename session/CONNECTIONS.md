@@ -38,3 +38,6 @@ Verify returned commit via GitHub. A browser chatbot may have sandbox and GitHub
 browser-tool supports request JSON files on browser-bus with matching responses. It was verified for direct browser tool calls in this session.
 It does not by itself expose the built-in agent's chat API. Use REST for messenger instructions.
 Pushing browser-tool main triggers host self-update; do not modify that repo for drive-tool work.
+
+## Authorized synthetic stress target (2026-10-16)
+User designated instance-20261015-210506, external136.111.20.139, GCP projectproject-f1531124-379f-493a-a79, zoneus-central1-a (verified console). Connect through existing Cloud Shell gcloud compute ssh, no credential publication. Bounded synthetic stress/edge-case tests only after local integration gates. No real roots/public service exposure. Browser Cloud Shell tab15 being established.
