@@ -122,3 +122,10 @@ Dolesh explicitly requests that Codex take project responsibility and address Ge
 ## D014 — Direct access without full-drive mapping or manual staging (2026-10-15)
 
 Drive Tool must let any authorized agent locate and read permitted files in place. Known references resolve directly without recursive enumeration; unknown-file search is bounded and reports continuation/exhaustion honestly. No mandatory drive mirror/index or copy into a special folder. The underlying source permission and per-agent policy both apply; a reference is not a grant. Streaming, limits, precise failures, cancellation and multi-agent isolation require separate modules. Requirements and explicit current gaps are in session/FILE-ACCESS-REQUIREMENTS.md. This is a design requirement, not a completed connector/service claim.
+
+## 2026-10-15 — Read-only core merged into main
+Dolesh merged feature/readonly-core-candidate (99e1025) into main via pull request #1, merge
+commit a709f0d. Claude Code verified from git that the candidate is in main and that drive_tool/
+and tests/ match 99e1025 exactly (the revision validated with 140 tests on the cloud target and
+on Python 3.11/3.12). Pre-merge trial merge: no conflicts, 15 files added, nothing existing
+changed. No tests executed by the director; no deployment.

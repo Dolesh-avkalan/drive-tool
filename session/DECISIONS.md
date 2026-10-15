@@ -56,3 +56,12 @@ Dolesh explicitly requests that Codex take project responsibility and address Ge
 ## D014 — Direct access without full-drive mapping or manual staging (2026-10-15)
 
 Drive Tool must let any authorized agent locate and read permitted files in place. Known references resolve directly without recursive enumeration; unknown-file search is bounded and reports continuation/exhaustion honestly. No mandatory drive mirror/index or copy into a special folder. The underlying source permission and per-agent policy both apply; a reference is not a grant. Streaming, limits, precise failures, cancellation and multi-agent isolation require separate modules. Requirements and explicit current gaps are in session/FILE-ACCESS-REQUIREMENTS.md. This is a design requirement, not a completed connector/service claim.
+
+## D015 — Read-only core merged into main (2026-10-15)
+
+Dolesh approved merging the accepted read-only core (MODULE-001, MODULE-002, MODULE-003 at
+80bf548, integration candidate 99e1025) into main; merged as a709f0d with a merge commit that
+preserves worker history. Feature branches remain as historical evidence. The merge is a library
+baseline only; deployment, agent-facing listing (needs an enumeration budget), Google Drive,
+writes and the API remain separate gated work. Supersedes the "separate feature branches, not
+merged" boundary in CORE-ACCEPTANCE.md.

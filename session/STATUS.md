@@ -1,3 +1,23 @@
+# Latest milestone — read-only core merged into main, 2026-10-15 Asia/Calcutta
+
+Supersedes "no implementation merge" statements below. Dolesh approved and performed the merge
+of feature/readonly-core-candidate (99e102522da4f0eeee465fe231ad62f0cc4ecad8) into main as pull
+request #1: merge commit a709f0d12a6b32d3ddd071a0dd52f37b6dfa9673 (2026-10-15 04:55:48 UTC).
+
+Directly verified from git after the merge (Claude Code session, read-only checks, no test
+execution): 99e1025 is an ancestor of main; drive_tool/ and tests/ on main are byte-identical
+to 99e1025, the exact revision that passed 140 tests on the cloud target (Python 3.14.4) and on
+Python 3.11/3.12 in the delegated sandbox. A trial merge beforehand showed no conflicts: the
+merge only adds 15 files (MODULE-001/002/003 source, tests, evidence and the integration test);
+session/, tasks/ and README.md were unchanged by it.
+
+main now contains: MODULE-001 storage contract and in-memory adapter, MODULE-002 offset listing
+helper, MODULE-003 bounded read-only POSIX local adapter (accepted at 80bf548), and the read-only
+core integration tests. This is a library merge, not a deployment: no service, REST/MCP, Google
+Drive/OAuth, writes, jobs or PC/cloud installation exists. Next gates unchanged: bounded
+enumeration budget before agent-facing listing (listing still materializes all direct
+children), then the direct-access design in FILE-ACCESS-REQUIREMENTS.md.
+
 # Latest milestone — actual cloud test PASS, 2026-10-15 Asia/Calcutta
 
 Supersedes earlier cloud-pending statements below. At owner's explicit request, Codex reviewed and orchestrated Sarvam's unchanged pinned runner on actual directortemp. Candidate 99e102522da4f0eeee465fe231ad62f0cc4ecad8 passed 140 tests on Python 3.14.4 with zero skips; all six filesystem/kernel checks passed, runner exit 0. All 17 source pins and both runner hashes verified before execution. Post-test existing browser services active and API health ok. Synthetic workspace 400 KiB; no installation, reboot, service changes or implementation merge.

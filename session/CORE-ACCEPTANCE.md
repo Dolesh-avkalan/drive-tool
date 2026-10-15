@@ -4,6 +4,9 @@ Director-owned design, resumed 2026-10-14 under the owner's stable/light/modular
 
 ## Current acceptance boundary
 
+Update 2026-10-15 (D015): the integrated read-only core (99e1025) is merged into main as
+a709f0d. The paragraph below describes the pre-merge state; the scope limits still apply.
+
 MODULE-001 storage contract/in-memory adapter, MODULE-002 offset listing helper and MODULE-003 bounded read-only POSIX adapter form the initial core. They are separate feature branches, not an accepted service or release. No writes, OAuth, network collection, durable jobs, REST/MCP or deployment is implied by accepting these modules.
 
 Before recommending integration:
