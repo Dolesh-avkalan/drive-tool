@@ -270,3 +270,6 @@ Dolesh confirms second Sarvam on cloud host. D044 briefd6d1a8e, cloud bus736e00c
 ## D027 — service policy implementation overlaps range verification (2026-10-15)
 
 Dolesh asks to use DeepSeek after cloud Sarvam completes. D044 delivered source-grounded audit at drop152e5b6 with cloud account GitHub access confirmed; Codex read full report, TESTS_NOT_RUN. Codex chooses a minimal pure authentication/grant-policy boundary independent of range/HTTP work and specifies two files with immutable scoped grants, full bounded digest scan, no permission leakage and no filesystem calls. D045 DeepSeek DeepThink implementation/tests dispatched cloud bus063d7aa with brief0a1c8bf; start/output pending. Local D043 independent verification continues. Cloud Sarvam will assemble/test generated D045 files after availability; cloud browser serializes actions, so do not claim three simultaneous browser executions. No acceptance/merge/deployment yet.
+
+D045 start verified in cloud viewer, DeepThink actively generating policy code, chat26cfe297-e5e0-4416-9bc5-3370d58f7a84. No final output or execution claim.
+
