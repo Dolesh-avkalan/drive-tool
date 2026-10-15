@@ -1,5 +1,7 @@
 # Resume Drive Tool here
 
+**Latest (2026-10-15 ~13:35 UTC): read session/history/2026-10-15-claude-director-handoff.md first.** Claude directed today: MODULE-004 merged (af42edb), MODULE-005 relay chain d025-d028 in progress on the browser-tool box (d027/d028 held in hold/ on browser-bus). The notes below are older.
+
 Last checkpoint: 2026-10-14, Asia/Calcutta. Read STATUS.md for active tasks; the October 6 messenger details below are historical.
 Repository: https://github.com/Dolesh-avkalan/drive-tool
 Owner: Dolesh (GitHub: Dolesh-avkalan).
