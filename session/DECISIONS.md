@@ -101,3 +101,7 @@ or descriptors left). Rule decided: with overwrite=False, if the parent-director
 published the file, the error stands (durability not confirmed) and the file stays; a retry gets
 AlreadyExistsError. Request-id idempotency for that case belongs to the service layer (MODULE-006). Merge only
 with Dolesh's approval.
+
+## D019 — MODULE-005 merged; resume through the local team relay (2026-10-15)
+
+Codex fetched Claude's handoff, verified MODULE-004 is merged and MODULE-005 PR #3 is open at a65da4e. Checked the source delta, raw Sarvam logs and byte-identical proof/evidence artifacts; Claude's independent 204-test/mutation/race results remain attributed to Claude. Dolesh explicitly approved PR #3 in this chat. Merged using expected head a65da4e as a84f6b3328d2caeb8d71f7c009e370dfea9cf452. No deployment. D031 fresh Argon design review is dispatched through the healthy local VM relay for partial bounded enumeration and accurate global raw-entry budget accounting, without changing the old listing contract. Cloud relay handoff tasks are complete. Historical status preserved; current STATUS rewritten for a clear resumption point.

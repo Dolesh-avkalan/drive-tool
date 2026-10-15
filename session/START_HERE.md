@@ -1,3 +1,7 @@
+# Resume Drive Tool
+
+Read session/STATUS.md first. Codex resumed after Claude's 2026-10-15 handoff; PR #3 merged as a84f6b3 after approval. D031 partial-scan design review is active on the local VM; do not duplicate it. Current STATUS supersedes older active-task statements below.
+
 # Resume Drive Tool here
 
 **Latest (2026-10-15 ~13:35 UTC): read session/history/2026-10-15-claude-director-handoff.md first.** Claude directed today: MODULE-004 merged (af42edb), MODULE-005 relay chain d025-d028 in progress on the browser-tool box (d027/d028 held in hold/ on browser-bus). The notes below are older.

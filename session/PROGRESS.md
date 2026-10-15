@@ -205,3 +205,7 @@ once automatically: 20,675 -> 61,602 chars); d027 Sarvam: 15da7d4 (DeepSeek code
 evidence; 199 OK on 3.11.2/3.12.13; 5 mutations caught. d028 Argon: ACCEPT WITH NITS (5 nits). d029 DeepSeek
 proof tests + 2 edits; d030 Sarvam bab5117/1dcfeef/a65da4e, 204 OK, 8 mutations caught. Director verification
 and probes in D018. PR to main opened.
+
+## D019 — MODULE-005 merged; resume through the local team relay (2026-10-15)
+
+Codex fetched Claude's handoff, verified MODULE-004 is merged and MODULE-005 PR #3 is open at a65da4e. Checked the source delta, raw Sarvam logs and byte-identical proof/evidence artifacts; Claude's independent 204-test/mutation/race results remain attributed to Claude. Dolesh explicitly approved PR #3 in this chat. Merged using expected head a65da4e as a84f6b3328d2caeb8d71f7c009e370dfea9cf452. No deployment. D031 fresh Argon design review is dispatched through the healthy local VM relay for partial bounded enumeration and accurate global raw-entry budget accounting, without changing the old listing contract. Cloud relay handoff tasks are complete. Historical status preserved; current STATUS rewritten for a clear resumption point.
