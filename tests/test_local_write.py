@@ -472,8 +472,11 @@ class TestSeams(BaseLocalWriteTest):
         w1 = DirFsyncFailCounting(self.adapter)
         with self.assertRaises(LocalStorageError):
             w1.write_bytes(self._root_ref(), "a.bin", b"x")
+        # overwrite=False publishes atomically via link, so the created file
+        # is already visible when the parent-dir fsync fails; the error-path
+        # contract only requires the temp name to be gone and no double unlink.
         self.assertEqual(len(w1.unlink_calls), 1)
-        self.assertEqual(os.listdir(self.root), [])
+        self.assertEqual(os.listdir(self.root), ["a.bin"])
 
         w2 = DirFsyncFailCounting(self.adapter)
         with self.assertRaises(LocalStorageError):
