@@ -255,3 +255,114 @@ No `__pycache__`/`.pyc` file is tracked on the branch.
   mutation check and adversarial probes at the pushed commit remain the
   acceptance gates, per the brief. This report claims only what was actually
   executed here.
+
+## 9. Review nits (d028 closure) — proof tests and cleanup order
+
+Gemini's independent review (d028) accepted MODULE-005 with five non-blocking
+nits. DeepSeek's follow-up (d029) delivered one new test file and two whole-line
+edits to `drive_tool/local_write.py`. This section records the assembler's
+execution of that round: the commit, the run on both interpreters, and the
+mutation check of the mutations d029 lists plus the five additional mutations
+named in the task.
+
+### 9.1 Commit
+
+| # | Commit | Message |
+| --- | --- | --- |
+| 5 | `2df3cc0a7cfe35fd327bd4c0df9da28d19b4ed18` | Close MODULE-005 review nits: proof tests and cleanup order (DeepSeek) |
+
+Parent of commit 5 is commit 4 (`dda193b`, the previous tip of this branch).
+
+Commit 5 changes exactly two paths:
+
+- `tests/test_local_write_proofs.py` (new, 209 lines, 5 tests) — added exactly
+  as DeepSeek delivered it in d029's `FILE` block.
+- `drive_tool/local_write.py` — the two `EDIT` blocks from d029, applied exactly:
+  1. `_check_writer_platform_capabilities` now requires `O_NOFOLLOW` and
+     `O_CLOEXEC` in addition to `O_WRONLY`, `O_CREAT`, `O_EXCL` (d028 nit 3,
+     capability half);
+  2. in `write_bytes`, `tmp_on_disk = False` is set immediately *before* the
+     post-link `unlink` of the temp name (d028 nit 4).
+
+No other file was changed. The two `local_write.py` hunks are +2/-2 lines.
+
+The new file's five tests, one per d028 nit:
+
+| Test | d028 nit |
+| --- | --- |
+| `TestNit1IntermediateSymlink.test_intermediate_symlink_in_parts_before_last_refused` | 1 |
+| `TestNit2PublishSeams.test_publish_uses_link_for_no_overwrite_and_rename_for_overwrite` | 2 |
+| `TestNit3TempOpenFlagsAndName.test_temp_open_has_cloexec_and_16_lower_hex_name` | 3 |
+| `TestNit4PostLinkUnlinkFailure.test_post_link_unlink_failure_calls_unlink_once` | 4 |
+| `TestNit5ClosedPrecedenceAndMkdirValidation.test_closed_wrong_source_precedes_closed_and_args_and_mkdir_validation` | 5 |
+
+### 9.2 Interpreters and result
+
+- Interpreter A: **Python 3.11.2**
+- Interpreter B: **Python 3.12.13**
+- Command (both, from the repository root):
+
+  ```
+  python3.11 -m unittest discover -s tests -v
+  python3.12 -m unittest discover -s tests -v
+  ```
+
+| Interpreter | Count | Final line | Exit |
+| --- | --- | --- | --- |
+| Python 3.11.2 | `Ran 204 tests in 1.947s` | `OK` | 0 |
+| Python 3.12.13 | `Ran 204 tests in 2.073s` | `OK` | 0 |
+
+204 = the 199 tests of the prior round plus the 5 new proof tests. Both
+interpreters pass, so **the run proves no defect**. Per the instruction to fix
+only defects the run proves, no `Sarvam fixes:` commit was made this round, and
+no test was weakened or skipped.
+
+### 9.3 Mutation check
+
+Each mutation was applied to a scratch copy of the branch (never committed), the
+full suite was run on both interpreters, and the copy was discarded. "Failing"
+means the named test failed or errored. Results are identical on Python 3.11.2
+and 3.12.13.
+
+| # | Mutation (applied to a scratch copy) | d029 ref | Failing tests | Caught? |
+| --- | --- | --- | --- | --- |
+| M1 | drop `O_NOFOLLOW` from the intermediate-traversal dir open (`local.py`, `_traverse_parent_dir` `dir_flags`) | nit 1 | `test_intermediate_symlink_in_parts_before_last_refused` (new), `test_final_and_intermediate_symlinks_rejected_and_omitted_from_listing`, `test_dir_swap_before_component_open_read_traversal_rejected`, `test_dir_swap_before_component_open_stat_traversal_rejected`, `test_deterministic_descriptor_accounting_across_success_and_failures`, `test_closed_wrong_source_precedes_closed_and_args_and_mkdir_validation` (8) | yes |
+| M2 | accept a symlink strictly inside `parts[:-1]` (drop `O_NOFOLLOW` **and** the explicit `S_ISLNK` rejection) | nit 1 | same six tests as M1 (8) | yes |
+| M3 | check-then-rename instead of atomic `link` for `overwrite=False` (`local_write.py`, `write_bytes`) | nit 2 / extra | `test_publish_uses_link_for_no_overwrite_and_rename_for_overwrite` (new), `test_temp_open_has_cloexec_and_16_lower_hex_name` (new), `test_mutation_guard_temp_open_flags_and_mode`, `test_mutation_guard_fsync_called_on_file_and_dir_fds`, `test_seam_link_failures_eexist_and_eperm_clean_up`, `test_seam_write_handles_short_writes_and_eintr`, `test_write_and_read_back_root_and_nested`, `test_write_empty_and_exact_max_write_bytes`, `test_name_validation_all_invalid_classes`, `test_concurrent_two_writers_race_overwrite_false` (10) | yes |
+| M4 | drop `O_CLOEXEC` from the temp-file open (`local_write.py`, `_create_temp_file`) | nit 3 / extra | `test_temp_open_has_cloexec_and_16_lower_hex_name` (new) (1) | yes |
+| M5 | use 8 hex characters in the temp name (`secrets.token_hex(4)`) | nit 3 / extra | `test_temp_open_has_cloexec_and_16_lower_hex_name` (new) (1) | yes |
+| M6 | move `tmp_on_disk = False` back after the post-link `unlink` | nit 4 / extra | `test_post_link_unlink_failure_calls_unlink_once` (new) (1) | yes |
+| M7 | check closed state before source mismatch (`local.py`, `_check_source_and_state`) | nit 5 | `test_closed_wrong_source_precedes_closed_and_args_and_mkdir_validation` (new), `test_source_mismatch_precedence_across_all_methods_and_states`, `test_check_order_source_closed_validation` (10) | yes |
+| M8 | let `mkdir` validate the name before checking the source (`local_write.py`, `mkdir`) | nit 5 / extra | `test_closed_wrong_source_precedes_closed_and_args_and_mkdir_validation` (new) (1) | yes |
+
+Every mutation is caught by at least one test; **no mutation survives**, so there
+is no mutation gap to report.
+
+Notes on the caught failures:
+
+- M1 and M2 are the two forms of d029's nit-1 mutation ("drop `O_NOFOLLOW` during
+  intermediate traversal **or** accept a symlink strictly inside `parts[:-1]`").
+  Both are caught by the new proof test and by the pre-existing containment
+  tests. M2 is behaviourally equivalent to M1 for this scenario because, once
+  `O_NOFOLLOW` is gone, the intermediate `open` follows the symlink and `fstat`
+  already reports the target directory.
+- M3 (check-then-rename) is now caught **deterministically** by the new
+  `TestNit2` proof test, which records the publish seams and requires exactly one
+  `_os_link` call with `follow_symlinks=False` and zero `_os_rename` calls when
+  `overwrite=False`. This closes d028 nit 2's concern that check-then-rename was
+  only caught indirectly through the race test (the race test fails as well).
+- M4 and M5 are caught **only** by the new `TestNit3` proof test, which closes
+  d028 nit 3's observation that neither `O_CLOEXEC` nor the 16-hex suffix length
+  was asserted anywhere.
+- M6 is caught by the new `TestNit4` proof test, which requires exactly one
+  post-link `unlink` call.
+- M7 and M8 are caught by the new `TestNit5` proof test; M7 also fails the
+  pre-existing precedence tests, while M8 shows that the new `mkdir`-precedence
+  assertion is the only test that binds that ordering.
+
+### 9.4 Blob hashes of the changed files
+
+| Path | Blob SHA |
+| --- | --- |
+| `tests/test_local_write_proofs.py` | `6abf5f1b4bceae58877cb29182f685f71cd4343c` |
+| `drive_tool/local_write.py` | `9824052f349e94f87ee65215ab96e979b4d2a021` |
