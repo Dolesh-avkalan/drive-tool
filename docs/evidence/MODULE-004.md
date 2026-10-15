@@ -142,3 +142,72 @@ GitHub commit API exactly:
 - Independent code review (Gemini, d019) and independent director execution at
   the pushed commit remain the acceptance gates, per the brief. This report
   claims only what was actually executed here.
+
+## 8. Proof tests (DeepSeek d023; assembled and verified by Sarvam, d024)
+
+Gemini's review (`d022`) accepted MODULE-004 with five test nits: the existing
+suites exercised the enumeration and find rules but did not prove that the
+implementation avoided the forbidden shortcut each rule bans. DeepSeek (`d023`)
+wrote `tests/test_enumeration_proofs.py` to close those five gaps. Sarvam added
+the file exactly as delivered, ran it on Python 3.11 and 3.12, verified that
+each proof test fails under the mutation it targets, and fixed one fixture
+defect in the test (below). No implementation file was changed.
+
+### Commits
+
+| # | Commit | Message |
+| --- | --- | --- |
+| 1 | `d6f8afb76df6369258f3adbb85261403a6f5c974` | Add MODULE-004 proof tests (DeepSeek) — the d023 file exactly as delivered |
+| 2 | `2bb2c3a7626f6134381776beb68645399111b614` | Sarvam fixes: correct nested-directory path in the fd-leak proof test |
+| 3 | this commit | Document MODULE-004 proof tests and mutation results (this section) |
+
+Parent of commit 1 is `380613264657e2b035d8841baa1a3ed5b801580b`, the branch tip
+before this work.
+
+### Test fix (commit 2)
+
+Commit 1 added the d023 file exactly as delivered. On the real code one test
+errored on both interpreters: `test_no_fd_leak_on_repeated_limit_errors_in_nested_directory`
+raised `NotFoundError: entry 'p/sub/leaf' not found` instead of the expected
+`EnumerationLimitError`.
+
+Cause: the test built the fixture at `root/p/sub/leaf` but referenced
+`FileRef("src", "p/sub/leaf")`. In `LocalAdapter` the mandatory ID prefix is
+`p/`, so the file_id `p/sub/leaf` denotes the on-disk path `root/sub/leaf`, not
+`root/p/sub/leaf`. Gemini's nit-3 fix explicitly specifies the reference
+`FileRef("src", "p/sub/leaf")`, so the reference is correct and the *fixture*
+was wrong. Commit 2 changes only the fixture path to `root/sub/leaf` (two lines)
+so the reference resolves and the test lists a genuinely nested directory
+(both a `parent_fd` and a `scan_fd` are acquired). No assertion was weakened and
+no production file was touched.
+
+### Interpreters and result
+
+| Interpreter | Command | Result |
+| --- | --- | --- |
+| Python 3.11.2 | `python3.11 -m unittest discover -s tests -v` | 175 tests, OK |
+| Python 3.12.13 | `python3.12 -m unittest discover -s tests -v` | 175 tests, OK |
+
+169 tests pre-existed; the new file adds 6, for 175 total. All pass on both
+interpreters.
+
+### Mutation table
+
+Each mutation was applied to a scratch copy of the branch (never committed), the
+proof file was run alone, and the mutation was then reverted. "Failing" means
+the named proof test failed or errored under that mutation.
+
+| Mutation (the forbidden shortcut) | Proof test(s) that fail |
+| --- | --- |
+| M1 move the limit check to after the scan loop (`local.py` `list_children`) | `test_scan_stops_early_on_limit` |
+| M2 move entry counting below the odd-name filter (`local.py` `list_children`) | `test_backslash_name_counts_toward_limit_and_is_omitted` |
+| M3 stop adding the traversed `parent_fd` to `owned` (`local.py` `list_children`) | `test_no_fd_leak_on_repeated_limit_errors_in_nested_directory` |
+| M4a drop `or more_dirs_queued` (`search.py` `find`) | `test_max_results_on_last_entry_with_child_directory_queued`, `test_max_results_on_last_entry_with_sibling_directory_remaining` |
+| M4b drop `more_dirs_at_this_level` (`search.py` `find`) | `test_max_results_on_last_entry_with_sibling_directory_remaining` |
+| M5 `list_page` always passes `max_entries` (`listing.py`) | `test_list_page_passes_max_entries_only_when_given` |
+
+Every mutation is caught by at least one proof test; no proof test passed under
+its own mutation, so there is no proof gap. M4a removes the entire
+`more_dirs_queued` term, so it necessarily also trips the sibling-directory
+test (M4b isolates the `more_dirs_at_this_level` half). Results are identical on
+Python 3.11.2 and 3.12.13.
