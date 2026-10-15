@@ -359,3 +359,5 @@ User routing refinement: DeepSeek primary routine implementer; Sarvam short scop
 Gemini completion collected: D065 static baseline CHANGES REQUIRED with three concrete containment/identity/order issues and separate disposable fault-test design. Routed precise correction to DeepSeek D069, no deployment/target acceptance claim. Keep harsh-test extension staged behind runner corrections.
 
 DeepSeek completion: collected D066 actual patch (not HTTP yet), TESTS_NOT_RUN. Queued short Sarvam D070 assembly/verification while DeepSeek D068/D069 remain queued/active and local D067 test authoring active. Strict counts/mutation preserved.
+
+DeepSeek completion collected actual D068 HTTP adapter generated source (not tested). Queued short Sarvam exact source assembly D071, no rewrites. Local D067 conformance tests still pending. No HTTP acceptance claim, security/execution gates retained.
