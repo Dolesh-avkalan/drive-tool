@@ -19,7 +19,10 @@ from drive_tool.storage import (
     FileRef,
     NotDirectoryError,
     NotFoundError,
+    ScanBatch,
+    ScanUnsupportedError,
     SourceMismatchError,
+    StorageError,
 )
 
 # ---------------------------------------------------------------------------
@@ -53,11 +56,14 @@ class FakeAdapter:
     """Minimal StorageAdapter for search tests.
 
     ``children_by_id`` maps a ``file_id`` to its list of ``FileMetadata``.
-    When ``enforce_limit`` is true, a listing whose length exceeds the
-    requested ``max_entries`` raises :class:`EnumerationLimitError`.
-    ``raise_on`` maps a ``file_id`` to an exception instance that
-    ``list_children`` raises instead of returning. Every call is recorded in
-    ``calls`` as ``(file_id, max_entries)``.
+    ``scan_children`` (the method ``find`` requires) returns a bounded prefix:
+    when ``enforce_limit`` is true and a folder holds more than the requested
+    ``max_entries`` it returns that many items with ``complete=False``; when
+    ``enforce_limit`` is false it returns every item with ``inspected`` set to
+    the full length, an over-budget report a caller must reject. ``raise_on``
+    maps a ``file_id`` to an exception instance that both listing methods raise
+    instead of returning. Every call is recorded in ``calls`` as
+    ``(file_id, max_entries)``.
     """
 
     def __init__(
@@ -85,6 +91,23 @@ class FakeAdapter:
         ):
             raise EnumerationLimitError(max_entries)
         return items
+
+    def scan_children(self, parent, *, max_entries):
+        self.calls.append((parent.file_id, max_entries))
+        if parent.source_id != self.source_id:
+            raise SourceMismatchError(
+                f"source mismatch: {parent.source_id!r} != {self.source_id!r}"
+            )
+        if parent.file_id in self._raise_on:
+            raise self._raise_on[parent.file_id]
+        items = list(self._children.get(parent.file_id, []))
+        if self._enforce_limit and len(items) > max_entries:
+            return ScanBatch(
+                items=tuple(items[:max_entries]),
+                inspected=max_entries,
+                complete=False,
+            )
+        return ScanBatch(items=tuple(items), inspected=len(items), complete=True)
 
     def stat(self, ref):
         raise NotImplementedError
@@ -213,7 +236,9 @@ class FindLocalAdapterTests(unittest.TestCase):
                 self.assertEqual(len(r.items), 2)
                 self.assertTrue(r.truncated)
                 self.assertEqual(r.reason, "max_results")
-                self.assertEqual(r.inspected, 2)
+                # The whole 3-entry root scan is charged even though matching
+                # stopped after the second match.
+                self.assertEqual(r.inspected, 3)
 
                 r = find(adapter, ref, "m", max_results=3)
                 self.assertEqual(len(r.items), 3)
@@ -244,18 +269,20 @@ class FindLocalAdapterTests(unittest.TestCase):
             finally:
                 adapter.close()
 
-    def test_max_entries_exact_budget_vs_dirs_remaining(self):
+    def test_max_entries_budget_covering_whole_tree_is_complete(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "a.txt").write_text("x")
             (root / "b.txt").write_text("x")
             adapter = _make_local(root)
             try:
+                # Budget strictly greater than the folder size: EOF is observed
+                # within budget, so the walk is genuinely complete.
                 r = find(
                     adapter,
                     FileRef("src", ROOT_ID),
                     "txt",
-                    max_entries=2,
+                    max_entries=3,
                     max_depth=2,
                 )
                 self.assertEqual(len(r.items), 2)
@@ -265,6 +292,30 @@ class FindLocalAdapterTests(unittest.TestCase):
             finally:
                 adapter.close()
 
+    def test_local_exact_budget_is_conservatively_incomplete(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.txt").write_text("x")
+            (root / "b.txt").write_text("x")
+            adapter = _make_local(root)
+            try:
+                # A local folder holding exactly the budget is deliberately
+                # incomplete: entry B+1 is never probed, so EOF is unknown.
+                r = find(
+                    adapter,
+                    FileRef("src", ROOT_ID),
+                    "txt",
+                    max_entries=2,
+                    max_depth=2,
+                )
+                self.assertEqual(len(r.items), 2)
+                self.assertTrue(r.truncated)
+                self.assertEqual(r.reason, "max_entries")
+                self.assertEqual(r.inspected, 2)
+            finally:
+                adapter.close()
+
+    def test_max_entries_exhausted_with_dirs_remaining(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "a.txt").write_text("x")
@@ -329,20 +380,21 @@ class FindFakeAdapterTests(unittest.TestCase):
             _file(f"f{i}.txt", f"f{i}.txt", ROOT_ID) for i in range(2000)
         ]
         fake = FakeAdapter("fake", {ROOT_ID: children})
-        r = find(fake, FileRef("fake", ROOT_ID), "x", max_entries=100)
+        r = find(fake, FileRef("fake", ROOT_ID), "zzz", max_entries=100)
         self.assertTrue(r.truncated)
         self.assertEqual(r.reason, "max_entries")
-        self.assertEqual(r.inspected, 0)
+        # The whole bounded batch (the full remaining budget) is charged.
+        self.assertEqual(r.inspected, 100)
         # The adapter received the remaining budget and nothing more.
         self.assertEqual(fake.calls, [(ROOT_ID, 100)])
 
-    def test_defensive_guard_against_adapter_ignoring_budget(self):
+    def test_over_budget_report_is_rejected_loudly(self):
+        # A scanner that ignores its budget and reports more raw work than it
+        # was allowed is rejected, never clamped into an accepted result.
         children = [_file(f"f{i}.txt", f"f{i}.txt", ROOT_ID) for i in range(50)]
         fake = FakeAdapter("fake", {ROOT_ID: children}, enforce_limit=False)
-        r = find(fake, FileRef("fake", ROOT_ID), "zzz", max_entries=10)
-        self.assertTrue(r.truncated)
-        self.assertEqual(r.reason, "max_entries")
-        self.assertEqual(r.inspected, 10)
+        with self.assertRaises(StorageError):
+            find(fake, FileRef("fake", ROOT_ID), "zzz", max_entries=10)
 
     def test_subdirectory_storage_error_skipped(self):
         bad_id = "p/bad"
@@ -363,7 +415,7 @@ class FindFakeAdapterTests(unittest.TestCase):
         self.assertFalse(r.truncated)
         self.assertIsNone(r.reason)
 
-    def test_subdirectory_enumeration_limit_stops_not_skipped(self):
+    def test_subdirectory_partial_scan_truncates_not_skipped(self):
         a_id = "p/a"
         b_id = "p/b"
         root_children = [
@@ -380,7 +432,9 @@ class FindFakeAdapterTests(unittest.TestCase):
         self.assertTrue(r.truncated)
         self.assertEqual(r.reason, "max_entries")
         self.assertEqual(r.skipped, ())
-        # Only the root and 'a' were listed; 'b' was never reached.
+        # 'a' hit its budget mid-folder (a partial, not a failed, scan) and 'b'
+        # was never reached: the walk is truncated, not skipped.
+        self.assertEqual(r.inspected, 10)
         self.assertEqual([c[0] for c in fake.calls], [ROOT_ID, a_id])
         # 'a' was asked for the remaining budget (10 - 2 inspected).
         self.assertEqual(fake.calls[1], (a_id, 8))
