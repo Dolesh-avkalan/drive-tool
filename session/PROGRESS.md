@@ -323,3 +323,5 @@ Dolesh requested a ten-minute cadence because Sarvam tasks commonly take that lo
 
 D050 backend generation completed (notrun), D051 client review CHANGES REQUIRED: raw body-read transport exceptions bypasssafeerrors/saveuncertainty. No clientmerge. D052 local independent oldpin stillrunning lastpoll. Queued cloudD053 narrow NEWbranch fix with actualoldfail/newpass and headernit probes, thenD054 generatedbackend verbatimassembly/tests. Brief40c320a, bus87464e8. Preserved detailedSTATUS in datedhistory and replaced currentSTATUS with concise active-state/pins to reduce future director token cost. No implementation/tests bydirector, no deployment, no new acceptance claim. Returnidle after queued handoffs.
 
+
+2026-10-15 17:30 UTC: Collected D052 independent report at drop b3c4956:412/474 suites green but hostile-body exception reproduced and canonical prefix missing. Director confirms p/ mandatory. Observed D053 branch53450a4, final result pending. Dispatched local D055 exact-pin transport recheck plus isolated canonical-ID correction; cloud D054 backend assembly remains queued. No merge or deployment; implementation/testing delegated.
