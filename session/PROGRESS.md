@@ -294,3 +294,7 @@ User says Argon should be back and cloud assembly done. D046 report/raw413/6muta
 
 D048 start verified: cloud Gemini displays Argon High, submitted D048 policy-review prompt and active generation. Previous quota block cleared for this task. Saved screenshot locally. D049 remains queued, no duplicate jobs.
 
+
+## D030 — task-appropriate model selection; policy frontier review complete (2026-10-15)
+
+Dolesh says Argon need not always run high and Gemini3.8 is decent, leaving choice to Codex. Adopt lighter/lower-effort options for routine work and reserve frontier/high for hard architecture/security. Verify actual model/effort, no silent mismatch or acceptance-gate changes. D0484argon/high static policy review completed ACCEPT WITH NITS/0blockers, sole undefined Mapping annotation import is not runtime failure; Codex read complete report. D049 fresh execution remains pending/unverified; local D047 client task still running per last process poll. Cloud viewer currently displays Sarvam Code waitlist, not evidence D049 started. Do not conflate Code product access with Cowork/GitHub execution access confirmed in D046.

@@ -34,3 +34,7 @@ Update STATUS.md in place. Append dated entries to PROGRESS.md and numbered deci
 ## Standing merge authorization — 2026-10-15 (D025)
 
 Dolesh explicitly instructed: "dont ask me to merge ... if you are confident, then just do it". For Drive Tool, Codex is authorized to merge implementation PRs without a per-PR approval question once the applicable review, test/evidence and acceptance gates pass. Verify the exact reviewed/tested head and use expected-head protection; resolve blocking findings before merging and report the outcome afterward. This supersedes earlier per-merge approval requirements in this repository, including historical task briefs and decisions. It does not itself expand deployment, credential, real-storage or public-exposure authorization.
+
+## Model/effort selection — 2026-10-15 (D030)
+
+Dolesh explicitly leaves model/effort choice to Codex and notes Gemini3.8 is usable and Argon High is not required for every assignment. Match capability/effort to the task: routine assembly, tests, straightforward fixes and drafting use capable available lighter models or lower effort; reserve Argon/high for difficult architecture, security/authorization and adversarial reviews. Verify actual picker selection/availability, keep provenance, never silently downgrade an explicitly pinned review or invent unsupported effort choices. This supersedes any blanket preference to use4argon/high on every Gemini task. No quality gates are removed.
