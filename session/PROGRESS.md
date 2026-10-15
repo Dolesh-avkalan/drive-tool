@@ -261,3 +261,8 @@ D042 start verified through connected cloud viewer: DeepThink active, service-co
 
 D040 candidate121faf8/tree28ce7508, four allowed paths; raw builder351/zero skips3.11/3.12 and7mutants caught inspected, drop0f352c7. Full production delta reviewed by Codex; no implementation edits/test execution. D042 DeepSeek design completed, no code/tests. D043 independent range verification dispatched fresh local Sarvam, process46421, brief8f5a1cf; outputs/evidence expected perSTATUS. No acceptance/merge yet.
 
+
+## 2026-10-15 — second cloud Sarvam assigned separate service audit
+
+Dolesh confirms second Sarvam on cloud host. D044 briefd6d1a8e, cloud bus736e00c, new chat, design-only API/policy/resource/shutdown readiness audit while localD043 executes range verification. GitHub access/start pending verification; no shared branch edits, duplicate tests, merge or deployment. Expected report and blocked-access behavior in STATUS.
+

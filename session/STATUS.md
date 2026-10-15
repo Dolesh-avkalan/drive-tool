@@ -30,6 +30,9 @@ D042 replacement design review dispatched to DeepSeek with DeepThink:on, separat
 ## Active next gate — D043 independent range verification
 
 Fresh local Sarvam context dispatched from pinned tasks/d043-range-read-independent.md at8f5a1cf2efb70d6df752b5326703a85dbdfc2986, process46421, guest /home/ubuntu/d043-sarvam-result.json. Exact candidate121faf8; independently execute351-suite, inspect/rerun7mutations, adversarial syscall/containment/EOF/cleanup probes, raw logs/scripts/manifest in drop/drive-tool/module-005b/d043-independent-verification/. No source fixes, merge or deployment. Start/result must be checked before any claim; no duplicate relay dispatch.
+## D044 — second Sarvam on cloud host
+
+Dolesh confirms second Sarvam account is on the cloud box. D044 service readiness audit dispatched through cloud browser-bus736e00c, task tasks/d044.md, new chat. Canonical brief tasks/d044-service-readiness.md atd6d1a8e351d358af6c9c12c0d6bd47076d22e17a. Start/result and second account GitHub connector access NOT yet verified. Do not call it running/complete until evidence. Expected drop/drive-tool/module-006/d044-service-readiness/REPORT.md plus bus summary. Design/source inspection only: exact API mapping, anchored-grant choice, consistent resource arithmetic, honest Python shutdown and acceptance matrix. No duplicate D043 execution or source changes. Local D043 remains independent. Check cloud result for BLOCKED/PUBLISH_BLOCKED before retry.
 ## Service design
 
 D039 Gemini4argon/high completed, zero repairs, raw outputs/d039-gemini-result.json; saved reply session/history/d039-argon-service-design.md. Design review only, no implementation. Codex has NOT accepted the proposed specification verbatim. Useful: range-read extension before service, retained slots after timed-out I/O, explicit write uncertainty, four-method client and bounded soak. Corrections needed before dispatch: real repository paths/API names (proposal invents src/ layout and LocalAdapter.find); observation-qualified file-size/EOF under mutation; absolute header deadline rather than socket inactivity alone; per-source quotas alone do not guarantee global availability; shutdown cannot promise bounded drain of uninterruptible calls; offset list pages are not a snapshot across calls. Deferred idempotency must be explicit and not imply safe blind retry.
@@ -41,6 +44,7 @@ PR #4 integrated and exact implementation/test trees verified. Target evidence s
 ## Operating agreement
 
 Codex leads delivery and owns design/review/integration. Gemini, DeepSeek and Sarvam are the development team. Use short chat plus versioned task/source files; prefer attachments when working, pinned GitHub files otherwise. Gemini file-link/upload failure can justify a compact necessary inline source fallback. Delegate implementation and tests; director may orchestrate teammate-written target runners, transport artifacts and inspect evidence. D025 standing authorization: Codex merges reviewed/tested accepted implementation PRs without asking per PR; verify exact head and report the merge. Deployment authorization remains separate. Never publish credentials or private browser state. D043 local relay is active (see above); cloud D038/D042 complete, D041 quota-failed. Preserve browser services and synthetic evidence.
+
 
 
 
