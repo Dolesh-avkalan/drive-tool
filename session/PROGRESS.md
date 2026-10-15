@@ -355,3 +355,5 @@ User cloud completion check: D063 collected; D065 no result, D064 local active. 
 User local completion collection: D064 actual answer incomplete (baseline only, no files). Corrected status and split deliverables: DeepSeek production D068 cloud queue, Sarvam tests-only D067 local active. Frozen Gemini/director contract preserved, no director implementation or lowered gates.
 
 User routing refinement: DeepSeek primary routine implementer; Sarvam short scoped/internet-dependent work and fallback when DeepSeek limited. Persisted in AGENTS; current D067 test task remains isolated, no duplicate redispatch.
+
+Gemini completion collected: D065 static baseline CHANGES REQUIRED with three concrete containment/identity/order issues and separate disposable fault-test design. Routed precise correction to DeepSeek D069, no deployment/target acceptance claim. Keep harsh-test extension staged behind runner corrections.
