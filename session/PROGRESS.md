@@ -363,3 +363,5 @@ DeepSeek completion: collected D066 actual patch (not HTTP yet), TESTS_NOT_RUN. 
 DeepSeek completion collected actual D068 HTTP adapter generated source (not tested). Queued short Sarvam exact source assembly D071, no rewrites. Local D067 conformance tests still pending. No HTTP acceptance claim, security/execution gates retained.
 
 DeepSeek finished D069 runner fixes (generated only). Queued D072 Sarvam assembly/meaningful negative-gate execution, no deployment/target claim. Current HTTP generated code D068 awaits D071 publication and D067 tests; accepted source unchanged.
+
+Both-Sarvam completion: D067 test file published but55skipped pending adapter; dispatched D073 actual integration execution, no false test claim. D070 independently confirms DeepSeek test-order patch and semantic guard, but no remote candidate; defer publication handoff until current source assembly queue clears. Minimal director collection.
