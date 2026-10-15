@@ -90,3 +90,8 @@ Model steering D030: Codex chooses task-appropriate model/effort; Gemini3.8/lowe
 
 
 
+
+## Completion wake-up loop
+
+Active same-chat heartbeat automation named Drive Tool team handoffs, automation ID drive-tool-team-handoffs, every5minutes. Created through app automation tool (confirmed ACTIVE) after Dolesh identified that completed teammate jobs do not wake an idle director. It collects verified results and continues authorized handoffs/merges, keeps unchanged states quiet, respects current scope/permissions and per-host selected-tab serialization. Stop/disable after the current usable local agent-service/synthetic reliability milestone or no active/queued/authorized next work. This is periodic polling, not instant teammate push or a guaranteed delivery SLA. PC must remain awake/app running for local execution. Reuse/update this automation, do not create duplicates. Credential/private-state handling unchanged.
+
