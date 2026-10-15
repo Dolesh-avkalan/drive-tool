@@ -1,9 +1,12 @@
-# Active â MODULE-004 in progress, 2026-10-15 Asia/Calcutta
+# Latest milestone — MODULE-004 accepted (D017), awaiting merge, 2026-10-15 Asia/Calcutta
 
-Bounded enumeration (adapter-side entry budget, typed EnumerationLimitError) and bounded
-find; brief tasks/MODULE-004.md. Relay chain d016 (Argon design review) -> d017 (DeepSeek
-code+tests) -> d018 (Sarvam assemble/test/push to feature/module-004-bounded-enumeration)
--> d019 (Argon code review); outputs in drop drive-tool/module-004/. Not accepted yet.
+feature/module-004-bounded-enumeration at 70a7a00: bounded list_children (default 10,000 entries, typed
+EnumerationLimitError), ListingService max_entries passthrough, bounded breadth-first find (results, entry
+budget, depth; truncation reasons; skipped dirs). Argon review ACCEPT WITH NITS, nits closed by mutation-checked
+proof tests; director independent run 175/175. Measured: a 10-item page over 200,000 files now stops in 0.58 s,
+3.1 MB (was 2.0 s, 76 MB). Gap: find inside a folder over budget returns nothing (needs partial listing).
+PR: https://github.com/Dolesh-avkalan/drive-tool/pull/2 (merge needs Dolesh's approval).
+Next: MODULE-005 atomic no-overwrite save, MODULE-006 service (session/AGENT-INTERFACE.md).
 
 # Latest milestone — agent interface design and core quality review, 2026-10-15 Asia/Calcutta
 
