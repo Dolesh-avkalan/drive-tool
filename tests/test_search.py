@@ -412,8 +412,12 @@ class FindFakeAdapterTests(unittest.TestCase):
         r = find(fake, FileRef("fake", ROOT_ID), "match")
         self.assertEqual([m.name for m in r.items], ["x_match.txt"])
         self.assertEqual(r.skipped, (bad_id,))
-        self.assertFalse(r.truncated)
-        self.assertIsNone(r.reason)
+        # d035 / F-B compatibility change: a skipped subdirectory means the
+        # subtree was not fully searched, so the result is no longer an
+        # unqualified complete one. Previously this asserted `truncated is
+        # False` and `reason is None`.
+        self.assertTrue(r.truncated)
+        self.assertEqual(r.reason, "skipped")
 
     def test_subdirectory_partial_scan_truncates_not_skipped(self):
         a_id = "p/a"

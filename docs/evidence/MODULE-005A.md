@@ -44,6 +44,10 @@ merged and nothing is deployed.
 | `tests/test_partial_scan_proofs.py` | New (13 tests). |
 | `docs/evidence/MODULE-005A.md` | This report. |
 
+The d035 review corrections (§10) additionally change `drive_tool/search.py`,
+`drive_tool/local.py`, `tests/test_search.py` and `tests/test_partial_scan.py`,
+and add `tests/test_partial_scan_review_fixes.py`.
+
 `drive_tool/local_write.py`, `drive_tool/listing.py`, `drive_tool/__init__.py`,
 the read/stat containment paths and every `session/` document are **not**
 changed. Per the brief's allowed scope, `session/AGENT-INTERFACE.md` is
@@ -218,3 +222,84 @@ is tracked on the branch.
   mandatory; the public ceiling is `MAX_SCAN_ENTRIES = 100000`, matching
   `find`'s `max_entries` cap. Repeated identical bounded searches make no
   promise of eventual complete coverage.
+- **Completeness (d035, §10):** `truncated=False` with an empty `skipped` is the
+  only exhaustive result; a non-empty `skipped` always means the coverage is
+  unknown and must never be read as "not found".
+
+## 10. d035 review corrections
+
+Applied on a new branch `feature/module-005a-review-fixes` created from
+`593759a40645386427bad35d53e8b856aeaa68d5`; the original branch is preserved.
+The authoritative brief is `Dolesh-avkalan/drop`
+`drive-tool/module-005a/d035-input/TASK.md` @ `652c41e8091ce122da8b20e364a7ad59f5dfe0cd`.
+The independent report is `Dolesh-avkalan/drop`
+`drive-tool/module-005a/d034-independent-tests/d034-sarvam-independent-tests.md`
+@ `b19c564bda5093d3691d0c3d156c44608cc41a87` ("d034: publish independent review
+of MODULE-005A (Sarvam)"), whose verdict was CHANGES REQUIRED.
+
+### 10.1 The three decided fixes
+
+- **F-B (required).** `find`'s normal terminal return now reports
+  `truncated=True, reason="skipped"` when `skipped` is non-empty, so an
+  unqualified complete result always means exhaustive coverage. The existing
+  `max_results`/`max_entries`/`max_depth` reasons keep precedence (their returns
+  happen first) and `skipped` is always retained. The `FindResult` and `find`
+  docstrings now state the invariant: complete iff `truncated=False` **and**
+  `skipped` empty; a skipped folder means unknown coverage, never "not found".
+  No new API or property was added.
+- **F-A (required).** `ScanFailure.error` is validated to be a `StorageError` at
+  **every** depth, before the root-unwrap / below-root-skip decision. A malformed
+  report raises `StorageError` loudly and is never converted into a skipped
+  directory. Count bounds, `bool` rejection, and the valid root error's identity
+  and cause are preserved.
+- **F-C (accepted robustness).** `LocalAdapter.scan_children` now wraps any
+  `StorageError` escaping the scan body after a nonzero prefix in `ScanFailure`
+  carrying the consumed raw count (new `_post_yield_storage_error` helper plus an
+  outer `except StorageError`). An existing `ScanFailure` is preserved without
+  double wrapping; a pre-yield error is left unchanged. This widens the
+  guaranteed charged sources beyond the four enumerated OS failures; it is
+  robustness of the metadata/stat seam (the shipped `LocalAdapter` does not raise
+  from `_build_metadata`). Programming errors, `KeyboardInterrupt` and
+  `SystemExit` are not `StorageError` and are never converted. Primary-error
+  priority on simultaneous cleanup failure and no-retry-of-ambiguous-close are
+  unchanged.
+
+### 10.2 Compatibility change (two old assertions)
+
+Two pre-existing tests encoded the previous false completeness and were updated;
+this is the only behavioural compatibility change.
+
+| Test | Before | After |
+| --- | --- | --- |
+| `tests/test_search.py::test_subdirectory_storage_error_skipped` | `truncated is False`, `reason is None` | `truncated is True`, `reason == "skipped"` |
+| `tests/test_partial_scan.py::test_subdir_scanfailure_is_skipped_and_charged` | `truncated is False` | `truncated is True`, `reason == "skipped"` |
+
+Both still assert `skipped`, the charged `inspected` and the exact scan calls;
+only the completeness flags changed.
+
+### 10.3 Old-fail / new-pass
+
+New file `tests/test_partial_scan_review_fixes.py` (18 tests). Run against the
+pinned `593759a` code it fails for the intended reasons -- **9 (5 failures, 4
+errors)**, identical on 3.11.2 and 3.12.13: F-B (skipped not surfacing as
+`truncated`), F-A (malformed `error` accepted below root) and F-C (a bare
+`LocalStorageError` escaping instead of a charged `ScanFailure`, plus an
+uncharged depth>0 prefix). With the fixes applied the full combined suite is
+**274 tests, OK, exit 0** on both interpreters (256 previous + 18 new).
+
+### 10.4 Mutation check
+
+Each mutant reverts exactly one fix, in a scratch copy, full suite each time,
+identical on 3.11.2 and 3.12.13. **3 mutations, 3 caught, 0 survivors.**
+
+| # | Mutation | Caught by |
+| --- | --- | --- |
+| X-a | remove skipped terminal truncation (F-B) | 6 tests incl. `test_prescan_skipped_subdir_is_not_complete`, `test_midscan_skipped_subdir_is_not_complete`, `test_skipped_means_unknown_not_not_found` |
+| X-b | restore root-only `failure.error` validation (F-A) | `test_malformed_failure_error_below_root_raises_not_skipped` |
+| X-c | remove generic post-yield `StorageError` wrapping (F-C) | 5 tests incl. `test_metadata_storage_error_after_prefix_is_scanfailure`, `test_stat_storage_error_after_prefix_is_scanfailure` |
+
+The strict-B/no-lookahead, exact-local-EOF uncertainty, partial retention,
+capability gate and all write/list tests remain passing (they are part of the
+274). No interpreter was installed and no private data was touched. The new
+independent rerun and the frontier static review have not occurred; nothing here
+claims either.

@@ -44,10 +44,17 @@ __all__ = ["FindResult", "find", "ScanUnsupportedError"]
 class FindResult:
     """The outcome of a bounded :func:`find`.
 
-    ``items`` are the matches in walk order, ``truncated`` is ``True`` when a
-    bound stopped the walk (``reason`` names it), ``skipped`` holds the
-    ``file_id`` of every directory that could not be scanned, and ``inspected``
-    counts the **raw directory entries examined** by the adapter.
+    ``items`` are the matches in walk order, ``inspected`` counts the **raw
+    directory entries examined** by the adapter, and ``skipped`` holds the
+    ``file_id`` of every directory that could not be scanned.
+
+    ``truncated`` is ``True`` when the walk did **not** achieve exhaustive
+    coverage of the subtree: either a bound stopped it (``reason`` names it --
+    ``"max_results"``, ``"max_entries"`` or ``"max_depth"``) or a directory
+    could not be scanned (``reason="skipped"``). The subtree was searched
+    exhaustively **only when ``truncated`` is ``False`` and ``skipped`` is
+    empty**; a non-empty ``skipped`` means the coverage is unknown and must never
+    be read as "not found".
 
     ``inspected`` is the sum of the ``ScanBatch.inspected`` values charged as
     each directory was scanned, so it reflects the raw scan work even when
@@ -158,14 +165,21 @@ def find(
     charged immediately, so ``inspected`` measures raw scan work even when
     ``max_results`` stops matching early.
 
-    A ``ScanFailure`` re-raises the original error at the starting root, or, at
-    depth ``> 0``, is recorded in ``skipped`` after charging its ``inspected``,
-    and the walk continues only while budget remains. Any other ``StorageError``
-    listing a subdirectory is recorded in ``skipped`` (charging nothing, since
-    it failed before scanning); the same error listing ``parent`` propagates.
-    Reaching an entry budget with work left, or scanning a folder that was only
-    partially covered, ends the walk with ``truncated=True, reason="max_entries"``
-    unless ``max_results`` already stopped it first.
+    A ``ScanFailure`` is validated at every depth (its ``error`` must be a
+    :class:`~drive_tool.storage.StorageError`); it re-raises the original error
+    object at the starting root, or, at depth ``> 0``, is recorded in ``skipped``
+    after charging its ``inspected``, and the walk continues only while budget
+    remains. Any other ``StorageError`` listing a subdirectory is recorded in
+    ``skipped`` (charging nothing, since it failed before scanning); the same
+    error listing ``parent`` propagates.
+
+    Completeness is honest: ``truncated=False`` together with an empty
+    ``skipped`` is the only exhaustive result. Reaching an entry budget with work
+    left, or scanning a folder that was only partially covered, ends the walk
+    with ``truncated=True, reason="max_entries"``; a directory that could not be
+    scanned yields ``truncated=True, reason="skipped"``. ``max_results`` and
+    ``max_depth`` take precedence over ``"skipped"`` when they stop the walk
+    first, and ``skipped`` is always retained.
     """
     # -- validate before touching the adapter ------------------------------
     if not isinstance(name_contains, str) or name_contains == "":
@@ -217,14 +231,20 @@ def find(
             except ScanFailure as failure:
                 # A scan that failed after doing raw work still charges it.
                 inspected += _validate_failure_inspected(failure, remaining_budget)
+                # Validate the reported error at EVERY depth, before deciding
+                # whether to unwrap it at the root or skip below the root: a
+                # malformed report is rejected loudly and is never converted
+                # into a skipped directory.
+                error = failure.error
+                if not isinstance(error, StorageError):
+                    raise StorageError(
+                        "ScanFailure.error must be a StorageError, got "
+                        f"{type(error).__name__}"
+                    )
                 if depth == 0:
                     # The starting parent's own failure re-raises the original
                     # error object (and its preserved cause).
-                    if not isinstance(failure.error, StorageError):
-                        raise StorageError(
-                            "ScanFailure.error must be a StorageError"
-                        )
-                    raise failure.error
+                    raise error
                 # A subdirectory that failed mid-scan is skipped; the walk only
                 # continues while budget remains.
                 skipped.append(dir_ref.file_id)
@@ -306,6 +326,17 @@ def find(
             items=tuple(matches),
             truncated=True,
             reason="max_depth",
+            inspected=inspected,
+            skipped=tuple(skipped),
+        )
+
+    if skipped:
+        # A directory that could not be scanned means the subtree was not fully
+        # searched: an unqualified complete result must not be claimed.
+        return FindResult(
+            items=tuple(matches),
+            truncated=True,
+            reason="skipped",
             inspected=inspected,
             skipped=tuple(skipped),
         )

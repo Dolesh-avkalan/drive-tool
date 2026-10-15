@@ -550,6 +550,27 @@ class LocalAdapter:
             return ScanFailure(entry_count, underlying)
         return underlying
 
+    def _post_yield_storage_error(
+        self, entry_count: int, exc: StorageError
+    ) -> StorageError:
+        """Charge a post-yield ``StorageError`` from a metadata/stat seam.
+
+        Before any raw entry has been yielded the original error is returned
+        unchanged (zero raw work). After at least one raw entry, a plain
+        ``StorageError`` is wrapped in :class:`ScanFailure` carrying the consumed
+        raw count; an existing :class:`ScanFailure` is preserved without double
+        wrapping. This widens the *guaranteed* charged sources beyond the four
+        enumerated OS failures to any ``StorageError`` raised after a nonzero
+        prefix (robustness of the seam). It never converts a programming error,
+        ``KeyboardInterrupt`` or ``SystemExit`` -- which are not
+        ``StorageError`` -- into a storage success or partial result.
+        """
+        if isinstance(exc, ScanFailure):
+            return exc
+        if entry_count > 0:
+            return ScanFailure(entry_count, exc)
+        return exc
+
     # -- root initialization ---------------------------------------------------
 
     def _open_anchored_root(self, raw_root: str, parts: list[str]) -> int:
@@ -1232,6 +1253,15 @@ class LocalAdapter:
                 f"failed to iterate directory {parent.file_id!r}: {exc}",
                 exc,
             ) from exc
+        except StorageError as exc:
+            # Any StorageError escaping the scan body (for example from the
+            # metadata or stat seam) after a nonzero prefix is charged the same
+            # way; an existing ScanFailure is preserved without double wrapping
+            # and a pre-yield error is left unchanged.
+            wrapped = self._post_yield_storage_error(entry_count, exc)
+            if wrapped is exc:
+                raise
+            raise wrapped from exc
         finally:
             try:
                 self._release_owned(owned)

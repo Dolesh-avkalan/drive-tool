@@ -663,7 +663,12 @@ class SearchBatchValidationTests(unittest.TestCase):
         result, adapter = self._find(script, max_entries=100)
         self.assertEqual(result.skipped, ("p/sub",))
         self.assertEqual(result.inspected, 3)  # 1 (root) + 2 (failed sub)
-        self.assertFalse(result.truncated)
+        # d035 / F-B compatibility change: a skipped directory now surfaces as
+        # incomplete coverage. Previously this asserted `truncated is False`,
+        # which encoded the false completeness the review flagged: the caller
+        # could not tell the subtree had not been fully searched.
+        self.assertTrue(result.truncated)
+        self.assertEqual(result.reason, "skipped")
         self.assertEqual([c[0] for c in adapter.calls], [ROOT_ID, "p/sub"])
 
     def test_no_scans_after_failed_work_exhausts_budget(self):
