@@ -277,3 +277,8 @@ D045 start verified in cloud viewer, DeepThink actively generating policy code, 
 ## D028 — range reads independently accepted and merged (2026-10-15)
 
 D043 reproduced351tests/zero skips3.11/3.12,7mutants caught for intended assertions,34new adversarial probes bothversions. Evidence drop24a9a45349f2e38eef91e7bb8626aa944cbfe9db; reviewer ACCEPT WITH NITS, no blocker. Codex read full production diff/review/raw logs and accepts121faf848b2f33f80721239fc7716adba7a9ba62. Two maintenance/ordering nits do not change current behavior; retain as observations, no speculative refactor. PR5 created/attached and merged under standingD025 with expectedhead121faf8, merge1515182d0f273518d20a2ef80b5182cf6b36def2. Fetched main and verified drive_tool/tests identical to testedcandidate. No deployment; no new actualcloud/3.14 range-delta test claimed. D045 service policy generation pending.
+
+## 2026-10-15 — policy handoff to cloud Sarvam
+
+Live check: local relay idle; D045 completed16:38:09Z with generated files/TESTS_NOT_RUN, drop1aa5ba7. Codex read production output; potential escaped-root validation and mutable lookup issues flagged for actual tests. D046 assembly/testing dispatched cloud bus45904d3, pinned briefb0f5d8d, useful D044 chat; start pending. Verbatim initial candidate + initial raw tests required before narrow attributed fixes. Local verification complete, no other task claimed active. Handoff delayed until status check; do not describe a completed generation as still running.
+
