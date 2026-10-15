@@ -339,23 +339,23 @@ class TestValidationBeforeNetwork(unittest.TestCase):
         c = self.client
         self._assert_raises(TypeError, c.read, "src")  # file_id required
         self._assert_raises(ValueError, c.read, "src", "root")  # nonroot required
-        self._assert_raises(TypeError, c.read, "src", "f", offset=True)
-        self._assert_raises(ValueError, c.read, "src", "f", offset=-1)
-        self._assert_raises(TypeError, c.read, "src", "f", length=True)
-        self._assert_raises(ValueError, c.read, "src", "f", length=0)
-        self._assert_raises(ValueError, c.read, "src", "f", length=1048577)
-        self._assert_raises(ValueError, c.read, "src", "f", offset=2**63 - 1, length=1)
+        self._assert_raises(TypeError, c.read, "src", "p/f", offset=True)
+        self._assert_raises(ValueError, c.read, "src", "p/f", offset=-1)
+        self._assert_raises(TypeError, c.read, "src", "p/f", length=True)
+        self._assert_raises(ValueError, c.read, "src", "p/f", length=0)
+        self._assert_raises(ValueError, c.read, "src", "p/f", length=1048577)
+        self._assert_raises(ValueError, c.read, "src", "p/f", offset=2**63 - 1, length=1)
 
     def test_save_validation(self):
         c = self.client
         self._assert_raises(TypeError, c.save, "src")  # file_id required
         self._assert_raises(ValueError, c.save, "src", "root", b"x")
-        self._assert_raises(TypeError, c.save, "src", "f", "not-bytes")
-        self._assert_raises(TypeError, c.save, "src", "f", bytearray(b"x"))
-        self._assert_raises(TypeError, c.save, "src", "f", None)
-        self._assert_raises(ValueError, c.save, "src", "f", b"x" * 1048577)
-        self._assert_raises(TypeError, c.save, "src", "f", b"x", overwrite=1)
-        self._assert_raises(TypeError, c.save, "src", "f", b"x", create_parents=1)
+        self._assert_raises(TypeError, c.save, "src", "p/f", "not-bytes")
+        self._assert_raises(TypeError, c.save, "src", "p/f", bytearray(b"x"))
+        self._assert_raises(TypeError, c.save, "src", "p/f", None)
+        self._assert_raises(ValueError, c.save, "src", "p/f", b"x" * 1048577)
+        self._assert_raises(TypeError, c.save, "src", "p/f", b"x", overwrite=1)
+        self._assert_raises(TypeError, c.save, "src", "p/f", b"x", create_parents=1)
 
 
 # ---------------------------------------------------------------------------
@@ -426,11 +426,11 @@ class TestFindWire(unittest.TestCase):
     def test_find_custom_bounds(self):
         with _FakeDriveServer(_ok_responder({})) as server:
             _client(server.port).find(
-                "src", "dir", name_contains="x", limit=3, max_entries=10, max_depth=0
+                "src", "p/dir", name_contains="x", limit=3, max_entries=10, max_depth=0
             )
             self.assertEqual(
                 server.records[0]["body"],
-                b'{"source_id":"src","file_id":"dir","name_contains":"x",'
+                b'{"source_id":"src","file_id":"p/dir","name_contains":"x",'
                 b'"limit":3,"max_entries":10,"max_depth":0}',
             )
 
@@ -438,7 +438,7 @@ class TestFindWire(unittest.TestCase):
 class TestReadWire(unittest.TestCase):
     def test_read_request_and_reply(self):
         with _FakeDriveServer(_read_responder(b"hello", 0, 5, 111, True)) as server:
-            reply = _client(server.port).read("src", "f", offset=0, length=10)
+            reply = _client(server.port).read("src", "p/f", offset=0, length=10)
             self.assertIsInstance(reply, ReadReply)
             self.assertEqual(reply.data, b"hello")
             self.assertEqual(reply.offset, 0)
@@ -450,19 +450,19 @@ class TestReadWire(unittest.TestCase):
             self.assertEqual(record["headers"]["content-type"], "application/json")
             self.assertEqual(
                 record["body"],
-                b'{"source_id":"src","file_id":"f","offset":0,"length":10}',
+                b'{"source_id":"src","file_id":"p/f","offset":0,"length":10}',
             )
 
     def test_read_exact_fill_is_not_eof(self):
         with _FakeDriveServer(_read_responder(b"abcd", 0, 99, 1, False)) as server:
-            reply = _client(server.port).read("src", "f", offset=0, length=4)
+            reply = _client(server.port).read("src", "p/f", offset=0, length=4)
             self.assertEqual(reply.data, b"abcd")
             self.assertIs(reply.eof_observed, False)
 
     def test_read_stale_size_under_growth_is_allowed(self):
         # observed_size may legitimately be smaller than offset + len(data).
         with _FakeDriveServer(_read_responder(b"abcd", 10, 12, 1, False)) as server:
-            reply = _client(server.port).read("src", "f", offset=10, length=4)
+            reply = _client(server.port).read("src", "p/f", offset=10, length=4)
             self.assertEqual(reply.observed_size, 12)
             self.assertEqual(len(reply.data), 4)
 
@@ -475,7 +475,7 @@ class TestReadWire(unittest.TestCase):
         responder = _read_responder(b"x", 0, 1, 1, True, content_type="text/plain")
         with _FakeDriveServer(responder) as server:
             with self.assertRaises(DriveClientError) as ctx:
-                _client(server.port).read("src", "f", offset=0, length=1)
+                _client(server.port).read("src", "p/f", offset=0, length=1)
             self.assertEqual(ctx.exception.code, "unavailable")
 
     def test_read_missing_header_fails_closed(self):
@@ -490,7 +490,7 @@ class TestReadWire(unittest.TestCase):
 
         with _FakeDriveServer(responder) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=1)
+                _client(server.port).read("src", "p/f", offset=0, length=1)
 
     def test_read_duplicate_header_fails_closed(self):
         def responder(handler, record):
@@ -507,7 +507,7 @@ class TestReadWire(unittest.TestCase):
 
         with _FakeDriveServer(responder) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=1)
+                _client(server.port).read("src", "p/f", offset=0, length=1)
 
     def test_read_invalid_decimal_header_fails_closed(self):
         def responder(handler, record):
@@ -523,7 +523,7 @@ class TestReadWire(unittest.TestCase):
 
         with _FakeDriveServer(responder) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=1)
+                _client(server.port).read("src", "p/f", offset=0, length=1)
 
     def test_read_invalid_eof_token_fails_closed(self):
         def responder(handler, record):
@@ -539,34 +539,34 @@ class TestReadWire(unittest.TestCase):
 
         with _FakeDriveServer(responder) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=1)
+                _client(server.port).read("src", "p/f", offset=0, length=1)
 
     def test_read_offset_mismatch_fails_closed(self):
         with _FakeDriveServer(_read_responder(b"x", 5, 10, 1, True)) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=1)
+                _client(server.port).read("src", "p/f", offset=0, length=1)
 
     def test_read_short_window_without_eof_fails_closed(self):
         with _FakeDriveServer(_read_responder(b"x", 0, 10, 1, False)) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=5)
+                _client(server.port).read("src", "p/f", offset=0, length=5)
 
     def test_read_exact_fill_with_eof_is_protocol_invalid(self):
         with _FakeDriveServer(_read_responder(b"xxxxx", 0, 5, 1, True)) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=5)
+                _client(server.port).read("src", "p/f", offset=0, length=5)
 
 
 class TestSaveWire(unittest.TestCase):
     def test_save_request_and_reply(self):
-        result = {"ref": "f", "bytes_written": 3, "parents_may_have_been_created": True}
+        result = {"ref": "p/f", "bytes_written": 3, "parents_may_have_been_created": True}
         with _FakeDriveServer(_ok_responder(result)) as server:
-            reply = _client(server.port).save("src", "f", b"abc")
+            reply = _client(server.port).save("src", "p/f", b"abc")
             self.assertEqual(reply, result)
             record = server.records[0]
             self.assertEqual(
                 record["path"],
-                "/v1/save?source_id=src&file_id=f&overwrite=false&create_parents=true",
+                "/v1/save?source_id=src&file_id=p%2Ff&overwrite=false&create_parents=true",
             )
             self.assertEqual(record["headers"]["content-type"], "application/octet-stream")
             self.assertEqual(record["headers"]["authorization"], "Bearer " + TOKEN)
@@ -576,7 +576,7 @@ class TestSaveWire(unittest.TestCase):
     def test_save_flag_encoding(self):
         with _FakeDriveServer(_ok_responder({})) as server:
             _client(server.port).save(
-                "src", "f", b"", overwrite=True, create_parents=False
+                "src", "p/f", b"", overwrite=True, create_parents=False
             )
             path = server.records[0]["path"]
             query = parse_qs(urlsplit(path).query)
@@ -585,16 +585,16 @@ class TestSaveWire(unittest.TestCase):
 
     def test_save_query_quoting_round_trips(self):
         with _FakeDriveServer(_ok_responder({})) as server:
-            _client(server.port).save("src", "a b/c+d", b"x")
+            _client(server.port).save("src", "p/a b/c+d", b"x")
             path = server.records[0]["path"]
             self.assertTrue(path.startswith("/v1/save?"))
             query = parse_qs(urlsplit(path).query)
             self.assertEqual(query["source_id"], ["src"])
-            self.assertEqual(query["file_id"], ["a b/c+d"])
+            self.assertEqual(query["file_id"], ["p/a b/c+d"])
 
     def test_save_never_puts_credentials_in_query(self):
         with _FakeDriveServer(_ok_responder({})) as server:
-            _client(server.port).save("src", "f", b"x")
+            _client(server.port).save("src", "p/f", b"x")
             path = server.records[0]["path"]
             self.assertNotIn(TOKEN, path)
 
@@ -666,7 +666,7 @@ class TestErrorEnvelopes(unittest.TestCase):
     def test_missing_flags_use_write_defaults_for_save(self):
         with _FakeDriveServer(_json_responder(400, {"ok": False, "error": {"code": "invalid"}})) as server:
             with self.assertRaises(DriveClientError) as ctx:
-                _client(server.port).save("src", "f", b"x")
+                _client(server.port).save("src", "p/f", b"x")
             self.assertEqual(ctx.exception.code, "invalid")
             self.assertIs(ctx.exception.outcome_uncertain, True)
             self.assertIs(ctx.exception.retry_safe, False)
@@ -717,7 +717,7 @@ class TestBoundedReplies(unittest.TestCase):
     def test_read_over_requested_length_fails(self):
         with _FakeDriveServer(_read_responder(b"xxxxx", 0, 5, 1, True)) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=4)
+                _client(server.port).read("src", "p/f", offset=0, length=4)
 
     def test_read_declared_length_over_request_fails_before_read(self):
         def responder(handler, record):
@@ -733,13 +733,13 @@ class TestBoundedReplies(unittest.TestCase):
 
         with _FakeDriveServer(responder) as server:
             with self.assertRaises(DriveClientError):
-                _client(server.port).read("src", "f", offset=0, length=4)
+                _client(server.port).read("src", "p/f", offset=0, length=4)
 
     def test_save_success_body_over_cap_is_uncertain(self):
         big = b"x" * 70000
         with _FakeDriveServer(_raw_responder(200, big, content_type="application/json", declared_cl=None)) as server:
             with self.assertRaises(DriveClientError) as ctx:
-                _client(server.port).save("src", "f", b"x")
+                _client(server.port).save("src", "p/f", b"x")
             self.assertIs(ctx.exception.outcome_uncertain, True)
             self.assertIs(ctx.exception.retry_safe, False)
 
@@ -775,7 +775,7 @@ class TestTransport(unittest.TestCase):
         client = _client(1)
         with _Seam(client, [conn]):
             with self.assertRaises(DriveClientError) as ctx:
-                client.save("src", "f", b"x")
+                client.save("src", "p/f", b"x")
             self.assertEqual(ctx.exception.code, "unavailable")
             self.assertIs(ctx.exception.outcome_uncertain, True)
             self.assertIs(ctx.exception.retry_safe, False)
@@ -794,7 +794,7 @@ class TestTransport(unittest.TestCase):
         client = _client(1)
         with _Seam(client, conns) as seam:
             with self.assertRaises(DriveClientError):
-                client.save("src", "f", b"x")
+                client.save("src", "p/f", b"x")
             self.assertEqual(seam.calls, 1)
 
 
@@ -1122,6 +1122,119 @@ class TestResponseBodyTransportErrorsFakeServer(unittest.TestCase):
                 )
         self.assertEqual(ctx.exception.code, "unavailable")
 
+
+
+# ---------------------------------------------------------------------------
+# Canonical file_id prefix (D055)
+#
+# Director adjudication: every non-root file_id MUST start with "p/" and carry a
+# non-empty canonical relative POSIX suffix; root is allowed only for list/find.
+# The id is sent on the wire unchanged (the prefix is never stripped).
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalFileIdPrefix(unittest.TestCase):
+    def setUp(self):
+        # Rejections must happen before any socket is opened.
+        self.client = _client(1)
+        _exploding_open(self.client)
+
+    def _reject(self, fn, *args, **kwargs):
+        with self.assertRaises(ValueError):
+            fn(*args, **kwargs)
+
+    def test_nonroot_ids_without_prefix_rejected_before_socket(self):
+        c = self.client
+        bad = [
+            "a.txt",       # no prefix at all
+            "docs/x",      # no prefix
+            "p",           # prefix is exactly "p/"; bare "p" is not enough
+            "p/",          # empty suffix
+            "p//x",        # empty segment after prefix
+            "p/../x",      # dotdot segment
+            "p/./x",       # dot segment
+            "/abs",        # absolute
+            "p/a\\b",      # backslash
+            "p/a\x00b",    # NUL
+        ]
+        for fid in bad:
+            self._reject(c.read, "src", fid)
+            self._reject(c.save, "src", fid, b"x")
+            self._reject(c.list, "src", fid)
+            self._reject(c.find, "src", fid, name_contains="x")
+
+    def test_root_still_rejected_for_read_and_save(self):
+        self._reject(self.client.read, "src", "root")
+        self._reject(self.client.save, "src", "root", b"x")
+
+    def test_canonical_ids_accepted_and_sent_unchanged(self):
+        good = [
+            "p/a.txt",
+            "p/docs/x",
+            "p/a b.txt",       # encoded space in suffix
+            "p/a+b.txt",       # plus in suffix
+            "p/sub/dir/f.txt",
+        ]
+        for fid in good:
+            client = _client(1)
+            resp = _FakeResponse(
+                200, [("Content-Type", "application/json")], b'{"ok":true,"result":{}}'
+            )
+            conn = _FakeConnection(resp)
+            with _Seam(client, [conn]) as seam:
+                client.list("src", fid)
+            self.assertEqual(seam.calls, 1)
+            method, url, body, headers = conn.requests[0]
+            self.assertEqual(json.loads(body.decode("utf-8"))["file_id"], fid)
+
+    def test_canonical_read_and_save_ids_sent_unchanged(self):
+        # read: prefix preserved verbatim in the JSON control body
+        client = _client(1)
+        resp = _FakeResponse(
+            200,
+            [
+                ("Content-Type", "application/octet-stream"),
+                ("X-Drive-Offset", "0"),
+                ("X-Drive-Observed-Size", "2"),
+                ("X-Drive-Observed-Mtime-Ns", "1"),
+                ("X-Drive-EOF-Observed", "true"),
+            ],
+            b"ab",
+        )
+        conn = _FakeConnection(resp)
+        with _Seam(client, [conn]):
+            client.read("src", "p/a b.txt", offset=0, length=4)
+        self.assertEqual(
+            json.loads(conn.requests[0][2].decode("utf-8"))["file_id"], "p/a b.txt"
+        )
+
+        # save: prefix preserved in the urlencoded query
+        client = _client(1)
+        resp = _FakeResponse(
+            200, [("Content-Type", "application/json")], b'{"ok":true,"result":{}}'
+        )
+        conn = _FakeConnection(resp)
+        with _Seam(client, [conn]):
+            client.save("src", "p/a b+c.txt", b"x")
+        query = parse_qs(urlsplit(conn.requests[0][1]).query)
+        self.assertEqual(query["file_id"], ["p/a b+c.txt"])
+
+    def test_root_accepted_for_list_and_find(self):
+        for op in ("list", "find"):
+            client = _client(1)
+            resp = _FakeResponse(
+                200, [("Content-Type", "application/json")], b'{"ok":true,"result":{}}'
+            )
+            conn = _FakeConnection(resp)
+            with _Seam(client, [conn]):
+                if op == "list":
+                    client.list("src", "root")
+                else:
+                    client.find("src", "root", name_contains="x")
+            self.assertEqual(len(conn.requests), 1)
+            self.assertEqual(
+                json.loads(conn.requests[0][2].decode("utf-8"))["file_id"], "root"
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

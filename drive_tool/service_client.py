@@ -134,6 +134,12 @@ def _validate_source_id(source_id: Any) -> None:
         raise ValueError("source_id must match [A-Za-z0-9_-]+")
 
 
+#: Mandatory prefix for every non-root canonical FileRef id. The id is sent on
+#: the wire *unchanged* (the prefix is never stripped); it is a canonical
+#: identifier, not a host path, and the server adapter owns containment.
+_CANONICAL_PREFIX = "p/"
+
+
 def _validate_file_id(file_id: Any, *, allow_root: bool) -> None:
     if not isinstance(file_id, str):
         raise TypeError("file_id must be a str")
@@ -145,11 +151,16 @@ def _validate_file_id(file_id: Any, *, allow_root: bool) -> None:
         if not allow_root:
             raise ValueError("file_id must not be 'root' for this operation")
         return
-    if file_id.startswith("/"):
-        raise ValueError("file_id must be a relative POSIX path")
     if "\\" in file_id:
         raise ValueError("file_id must not contain a backslash")
-    for segment in file_id.split("/"):
+    if not file_id.startswith(_CANONICAL_PREFIX):
+        raise ValueError("non-root file_id must start with 'p/'")
+    suffix = file_id[len(_CANONICAL_PREFIX):]
+    if suffix == "":
+        raise ValueError("file_id must have a non-empty suffix after 'p/'")
+    if suffix.startswith("/"):
+        raise ValueError("file_id suffix must be a relative POSIX path")
+    for segment in suffix.split("/"):
         if segment == "" or segment == "." or segment == "..":
             raise ValueError("file_id contains an invalid path segment")
 
