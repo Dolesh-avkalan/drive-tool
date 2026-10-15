@@ -1,6 +1,6 @@
 # Resume Drive Tool
 
-Read session/STATUS.md first. Codex resumed after Claude's 2026-10-15 handoff; PR #3 merged as a84f6b3 after approval. D031 partial-scan design review is active on the local VM; do not duplicate it. Current STATUS supersedes older active-task statements below.
+Read session/STATUS.md first. Codex resumed after Claude's 2026-10-15 handoff; PR #3 merged as a84f6b3 after approval. D031 design is complete; D032 partial-scan implementation is active on the local VM; do not duplicate it. Current STATUS supersedes older active-task statements below.
 
 # Resume Drive Tool here
 

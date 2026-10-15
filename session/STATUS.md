@@ -11,13 +11,14 @@ Checkpoint: 2026-10-15, Codex resumed after Claude's cloud session. Older status
 
 ## Active assignment
 
-D031: fresh Gemini 4 argon/high design review through the local VM scripted relay. Brief tasks/d031-partial-enumeration-design.md. Local orchestrator process session 18518, guest result /home/ubuntu/d031-gemini-result.json. Check result/process before redispatch. No other local relay is active. The cloud browser-bus snapshot contains completed d016..d030 tasks, no unfinished task from Claude's handoff.
+D031 completed: Gemini 4 argon/high design review, zero relay repairs. Full reply saved in session/history/d031-argon-partial-scan-design.md. Codex adopts ScanBatch and an optional bounded-scan capability but rejects uncounted B+1 lookahead, metadata-only legacy fallback and uncharged mid-scan failures. Exact director contract is tasks/MODULE-005A.md.
 
-Design target: MODULE-005A partial bounded enumeration. Current list_children drops already scanned supported items when it reaches the raw-entry cap; find thus loses early matches. find also charges metadata count rather than raw entries, allowing filtered entries to escape the global budget. D031 must define a small explicit partial-scan capability and honest truncation, preserve old list_children callers and containment/cleanup, and explain the conflict between stateless globally sorted offset continuation and bounded filesystem scans. No cursor/index framework or service implementation in this assignment.
+D032 implementation/test/evidence assigned to fresh Sarvam via local VM scripted relay. Branch feature/module-005a-partial-scan, pinned base 356a4d8 (contains approved writes merge). Active local orchestrator process 29818; guest result /home/ubuntu/d032-sarvam-result.json. Check process/result and remote branch before redispatch. No other team assignment is active in this local relay. Do not run a second relay task against its selected tab concurrently.
 
+Scope: strict raw-entry-limited scan with no B+1 lookahead; useful partial matches; explicit EOF uncertainty at exact local budget; failed-scan raw accounting and original error preservation; capability denial for unaccountable legacy search adapters. Existing all-or-nothing list behavior, direct reads and writes remain unchanged. Fresh full-suite/mutation evidence and independent review are required before acceptance. No new implementation is accepted or merged yet.
 ## Next
 
-Review d031, record exact contract, then assign focused implementation/tests to the team on a separate branch based on merged main. Independent review and regression/mutation evidence precede acceptance. Then MODULE-006 agent service per session/AGENT-INTERFACE.md, corrected for truthful scan/pagination/continuation semantics, followed by the multi-agent soak gate. Google Drive follows local routine acceptance.
+Collect d032 and verify exact branch artifacts, raw tests and mutation evidence. Assign fresh independent review and testing of the candidate; require corrections for confirmed blockers. Independent review and regression/mutation evidence precede acceptance. Then MODULE-006 agent service per session/AGENT-INTERFACE.md, corrected for truthful scan/pagination/continuation semantics, followed by the multi-agent soak gate. Google Drive follows local routine acceptance.
 
 ## Operating agreement
 

@@ -18,7 +18,10 @@ state an agent has to remember. Getting or saving a file is one call and a short
   needs no prior list/stat. Only destructive actions (trash, overwrite) need an explicit flag;
   there is no preview-then-confirm round trip for normal saves and reads.
 - Replies are short by default: one line per entry (`path  size  modified`), at most 20 entries
-  unless the agent asks for more (cap 100), and a single `more: <offset>` hint when truncated.
+  unless the agent asks for more (cap 100). `more: <offset>` applies only to result-window
+  pagination over a fully scanned folder within its enumeration budget. A bounded search
+  reports its truncation reason; it must not emit a fictitious offset continuation after
+  scan/depth exhaustion. Repeated identical prefix scans do not promise eventual full coverage.
 - Errors are one line from a fixed set of codes, with the fix in the text when known:
   `not_found`, `exists`, `denied`, `too_large`, `busy`, `timeout`, `unavailable`, `invalid`.
   Example: `not_found: p/reports/q3.pdf (closest: p/reports/2026/q3.pdf)`.
@@ -28,9 +31,12 @@ state an agent has to remember. Getting or saving a file is one call and a short
 
 - One small long-running service process per machine, standard library first, minimal pinned
   dependencies. REST is the core; MCP is a thin wrapper over the same calls.
-- Calls are stateless: bearer token -> agent identity; IDs are readable paths (`p/a/b.txt`);
-  continuation is a plain offset. A service restart loses nothing an agent holds; in-flight
-  calls fail with `unavailable` and are safe to retry.
+- Calls are stateless: bearer token -> agent identity; IDs are readable paths (`p/a/b.txt`).
+  Plain offsets select result windows only after complete bounded folder enumeration; no
+  persistent search cursor, snapshot or index is implied. After interruption, read-only
+  calls may be retried within policy. A save may already have published before an error or
+  lost reply (D018); do not promise safe blind write retries. MODULE-006 must define request-ID
+  idempotency and uncertain outcomes before offering that guarantee.
 - Adapters are opened at service start and kept open for the life of the process. They are
   closed only at shutdown after in-flight calls drain (removes the close-during-use hazard
   documented in MODULE-003).
@@ -44,7 +50,11 @@ state an agent has to remember. Getting or saving a file is one call and a short
 - Per-agent in-flight cap (default 2) and per-source cap. When full, return `busy` at once with
   a retry hint instead of queueing without bound.
 - Every call has a deadline (default 30 s); listing and find have entry budgets enforced inside
-  the adapter while scanning (not after materializing the directory) and report truncation.
+  the adapter while scanning (not after materializing the directory). An over-budget ordinary
+  list is `too_large`, not a silently incomplete sorted list. Find may return supported matches
+  from a bounded physical prefix, sorted within that subset, with an explicit incomplete result.
+  Scan accounting includes omitted entries and storage failures after partial work. A source
+  without an accountable bounded-scan capability cannot silently fall back to metadata counts.
 - Reads are bounded; larger files use stateless range reads (`offset`, `length`), no stream
   sessions to manage.
 - Saves: unique temp file in the destination folder, fsync, atomic no-overwrite publish
