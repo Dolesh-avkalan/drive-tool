@@ -56,6 +56,7 @@ import shutil
 import stat
 import sys
 import tempfile
+from dataclasses import dataclass
 from types import TracebackType
 
 from drive_tool.storage import (
@@ -82,6 +83,7 @@ __all__ = [
     "ReadLimitExceededError",
     "AdapterClosedError",
     "UnsupportedPlatformError",
+    "RangeReadResult",
     "LocalAdapter",
 ]
 
@@ -96,6 +98,13 @@ TEMP_PREFIX = ".drive-tool-tmp-"
 
 #: Maximum size of a single ``os.read`` chunk during bounded file reads.
 _READ_CHUNK_SIZE = 65_536
+
+#: Default ``read_range`` window (256 KiB) used when ``length`` is omitted and
+#: ``max_read_bytes`` is at least this large.
+_DEFAULT_RANGE_LENGTH = 262_144
+
+#: Largest value an ``int64`` offset or offset+length may take (``2**63 - 1``).
+_RANGE_MAX_BOUND = 2**63 - 1
 
 
 class LocalStorageError(StorageError):
@@ -120,6 +129,31 @@ class AdapterClosedError(LocalStorageError):
 
 class UnsupportedPlatformError(LocalStorageError):
     """Raised when required POSIX descriptor and no-follow features are absent."""
+
+
+@dataclass(frozen=True)
+class RangeReadResult:
+    """The outcome of a bounded :meth:`LocalAdapter.read_range` call.
+
+    ``data`` is the returned byte window (``len(data)`` is the returned byte
+    count), ``offset`` is the absolute file position the window started at, and
+    ``observed_size`` / ``observed_mtime_ns`` are single observations taken from
+    the initial ``fstat`` of the opened descriptor. They are never a coherent
+    snapshot, version, or content-hash promise: a concurrent writer may change
+    the file between the ``fstat`` and the reads, or between calls.
+
+    ``eof_observed`` is ``True`` only when a ``pread`` issued *within* the
+    requested window returned ``b''`` (an observed end of file), and ``False``
+    otherwise -- including when the returned window exactly filled the requested
+    length. It is not derived from the observed size and must not be read as a
+    stable property of the file.
+    """
+
+    data: bytes
+    offset: int
+    observed_size: int
+    observed_mtime_ns: int
+    eof_observed: bool
 
 
 def _no_follow_semantics_available() -> bool:
@@ -307,6 +341,46 @@ def _parse_file_id(file_id: object) -> tuple[str, ...]:
     return tuple(parts)
 
 
+def _validate_range_options(
+    offset: object, length: object, max_read_bytes: int
+) -> tuple[int, int]:
+    """Validate ``read_range`` options and resolve the effective window.
+
+    ``offset`` must be a non-``bool`` ``int`` in ``[0, 2**63 - 1]``. ``length``
+    must be ``None`` or a non-``bool`` ``int`` in ``[1, max_read_bytes]``;
+    ``None`` selects ``min(_DEFAULT_RANGE_LENGTH, max_read_bytes)``. ``offset +
+    effective_length`` must not exceed ``2**63 - 1``. Non-``int``/``bool``
+    values raise :class:`TypeError`; out-of-range ``int`` values raise
+    :class:`ValueError`. No filesystem work is performed here.
+    """
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise TypeError(f"offset must be an int, got {type(offset).__name__}")
+    if offset < 0 or offset > _RANGE_MAX_BOUND:
+        raise ValueError(
+            f"offset must be in [0, {_RANGE_MAX_BOUND}], got {offset}"
+        )
+
+    if length is None:
+        eff_length = min(_DEFAULT_RANGE_LENGTH, max_read_bytes)
+    else:
+        if isinstance(length, bool) or not isinstance(length, int):
+            raise TypeError(
+                f"length must be an int or None, got {type(length).__name__}"
+            )
+        if length < 1 or length > max_read_bytes:
+            raise ValueError(
+                f"length must be in [1, {max_read_bytes}], got {length}"
+            )
+        eff_length = length
+
+    if offset + eff_length > _RANGE_MAX_BOUND:
+        raise ValueError(
+            f"offset + effective length ({offset + eff_length}) exceeds "
+            f"{_RANGE_MAX_BOUND}"
+        )
+    return offset, eff_length
+
+
 def _validate_root_path_string(root: str | os.PathLike[str]) -> tuple[str, list[str]]:
     """Validate the configured root path and split it into traversal parts."""
     if not isinstance(root, (str, os.PathLike)):
@@ -463,6 +537,9 @@ class LocalAdapter:
 
     def _os_read(self, fd: int, length: int) -> bytes:
         return os.read(fd, length)
+
+    def _os_pread(self, fd: int, length: int, offset: int) -> bytes:
+        return os.pread(fd, length, offset)
 
     # -- descriptor lifetime helpers ------------------------------------------
 
@@ -691,6 +768,20 @@ class LocalAdapter:
                 f"LocalAdapter for source {self._source_id!r} is closed"
             )
         return self._root_fd
+
+    def _require_pread_capability(self) -> None:
+        """Fail closed when the running platform lacks ``os.pread``.
+
+        This is a per-call capability requirement of :meth:`read_range` only; it
+        is deliberately kept out of the constructor probe so that adapter
+        construction and :meth:`read_bytes` keep working on a platform that
+        satisfies their (weaker) contract.
+        """
+        if not callable(getattr(os, "pread", None)):
+            raise UnsupportedPlatformError(
+                "LocalAdapter.read_range requires a callable os.pread on this "
+                "platform"
+            )
 
     def _root_metadata(self) -> FileMetadata:
         return FileMetadata(
@@ -1368,3 +1459,137 @@ class LocalAdapter:
             chunks.append(chunk)
 
         return b"".join(chunks)
+
+    # -- bounded range reads (optional LocalAdapter capability) ----------------
+
+    def read_range(
+        self,
+        ref: FileRef,
+        *,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> RangeReadResult:
+        """Read a bounded byte window of regular file ``ref`` without seeking.
+
+        ``offset`` is the absolute file position to start at; ``length`` is the
+        maximum number of bytes to return (``None`` selects
+        ``min(_DEFAULT_RANGE_LENGTH, max_read_bytes)``). The window is read with
+        ``os.pread`` on a freshly opened, no-follow descriptor, so it never
+        disturbs a shared file offset and never reads the bytes before
+        ``offset``. ``offset`` beyond the current end of file is not an error:
+        it simply yields empty ``data`` and ``eof_observed=True``.
+
+        ``observed_size`` and ``observed_mtime_ns`` are single observations from
+        the initial ``fstat`` of the opened descriptor, not a coherent snapshot
+        or version promise. ``eof_observed`` is ``True`` only when a ``pread``
+        *inside the requested window* returned ``b''``; a window that exactly
+        fills the requested length is reported with ``eof_observed=False`` even
+        if the initial metadata size suggested the file ended there. Repeated
+        calls may therefore observe different file versions.
+
+        Raises the same source/state/ref/containment errors as
+        :meth:`read_bytes` (``TypeError``, :class:`SourceMismatchError`,
+        :class:`AdapterClosedError`, :class:`UnsafePathError`,
+        :class:`NotFoundError`, :class:`IsDirectoryError`,
+        :class:`NotDirectoryError`, :class:`UnsupportedEntryError`), a
+        ``TypeError``/``ValueError`` for invalid ``offset``/``length``, and
+        :class:`UnsupportedPlatformError` when ``os.pread`` is unavailable.
+        """
+        root_fd = self._check_source_and_state(ref)
+        parts = _parse_file_id(ref.file_id)
+
+        if not parts:
+            raise IsDirectoryError(f"{ROOT_ID!r} is a directory, not a file")
+
+        eff_offset, eff_length = _validate_range_options(
+            offset, length, self._max_read_bytes
+        )
+        self._require_pread_capability()
+
+        parent_fd = self._traverse_parent_dir(root_fd, parts[:-1], ref.file_id)
+        # A descriptor is owned the moment it is acquired; the single ``finally``
+        # below releases every owned descriptor exactly once, covering the
+        # parent-close handoff and the opened file descriptor.
+        owned: list[tuple[int, str]] = []
+        if parent_fd != root_fd:
+            owned.append((parent_fd, f"parent directory of {ref.file_id!r}"))
+        try:
+            target_name = parts[-1]
+            try:
+                file_fd = self._os_open(
+                    target_name, _file_open_flags(), dir_fd=parent_fd
+                )
+            except OSError as exc:
+                raise self._classify_component_open_error(
+                    target_name,
+                    parent_fd,
+                    exc,
+                    ref.file_id,
+                    is_intermediate=False,
+                    for_directory_op=False,
+                ) from exc
+            owned.append((file_fd, f"file descriptor for {ref.file_id!r}"))
+            return self._read_open_file_range(
+                file_fd, ref.file_id, eff_offset, eff_length
+            )
+        finally:
+            self._release_owned(owned)
+
+    def _read_open_file_range(
+        self, file_fd: int, file_id: str, offset: int, length: int
+    ) -> RangeReadResult:
+        """Validate ``file_fd`` is a regular file and read a bounded window.
+
+        The descriptor is ``fstat``ed once here; its size and mtime are reported
+        as observations only. The window is read with ``os.pread`` in chunks of
+        at most ``_READ_CHUNK_SIZE`` bytes, never issuing a zero-length request
+        and never probing past ``offset + length``.
+        """
+        try:
+            st = self._os_fstat(file_fd)
+        except OSError as exc:
+            raise LocalStorageError(
+                f"failed to fstat opened file {file_id!r}: {exc}"
+            ) from exc
+
+        if stat.S_ISDIR(st.st_mode):
+            raise IsDirectoryError(f"{file_id!r} is a directory, not a file")
+        if stat.S_ISLNK(st.st_mode):
+            raise UnsafePathError(f"{file_id!r} is a symbolic link")
+        if not stat.S_ISREG(st.st_mode):
+            raise UnsupportedEntryError(
+                f"{file_id!r} is not a regular file (mode {oct(st.st_mode)})"
+            )
+
+        observed_size = st.st_size
+        observed_mtime_ns = st.st_mtime_ns
+
+        chunks: list[bytes] = []
+        collected = 0
+        eof_observed = False
+
+        while collected < length:
+            request = min(_READ_CHUNK_SIZE, length - collected)
+            try:
+                chunk = self._os_pread(file_fd, request, offset + collected)
+            except OSError as exc:
+                if exc.errno == errno.EINTR:
+                    continue
+                raise LocalStorageError(
+                    f"failed while reading range of {file_id!r}: {exc}"
+                ) from exc
+
+            if not chunk:
+                eof_observed = True
+                break
+
+            collected += len(chunk)
+            chunks.append(chunk)
+
+        return RangeReadResult(
+            data=b"".join(chunks),
+            offset=offset,
+            observed_size=observed_size,
+            observed_mtime_ns=observed_mtime_ns,
+            eof_observed=eof_observed,
+        )
