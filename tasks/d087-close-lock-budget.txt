@@ -1,0 +1,170 @@
+D087 DeepSeek narrow HTTP close-budget fix. Gemini D084 ACCEPTed securitydelta but noted _close_lock waits before deadline is computed; director D064 explicitly forbids unbounded adapter-lock waits, so this must be resolved before final acceptance. Exact sourcecc1cd326 production8cd137f7; local D085 onlytestcontract edits, no production conflict. Return minimal unifieddiff for close(): compute finite validated callerdeadline BEFORE lock acquisition, acquire serialization lock with at most callerremainingbudget (timeout0 nonblocking), returnFalse on contention/deadline without sideeffects, preserve idempotentclosedTrue behavior/onceonlylistenerwake/serviceactiveFDownership. Do not hold/wait locks beyond singledeadline; releasefinally; reentrant/concurrentcalls safe. No broadredesign/authchanges. Include deterministic regression: firstclose blocked long in fake/servicelease seam, secondclose(timeout=.05) returnsFalse within .05+small scheduler allowance rather than waitingfirst5s; eventualcleanupTrue, no FDleak/doubleclose. Code/tests honestlyTESTS_NOT_RUN unlessactualexecution. Gemini handlessecurityreview; Sarvam assembles/tests. No merge/deploy. Exactclosecontext follows.        self._wake_listener()
+        if self._listener is not None:
+            try:
+                self._listener.close()
+            except OSError:
+                pass
+        with self._pool_cond:
+            for slot in self._slots:
+                if slot.conn is not None:
+                    try:
+                        slot.conn.close()
+                    except OSError:
+                        pass
+                    slot.conn = None
+        if self._accept_thread is not None and self._accept_thread.is_alive():
+            try:
+                self._accept_thread.join(timeout=1.0)
+            except BaseException:
+                pass
+        for worker in self._workers:
+            if worker.is_alive():
+                try:
+                    worker.join(timeout=1.0)
+                except BaseException:
+                    pass
+        try:
+            self._service.close(timeout=5.0)
+        except BaseException:
+            pass
+
+    # ----- public properties ----------------------------------------------
+
+    @property
+    def host(self):
+        return HOST
+
+    @property
+    def port(self):
+        return self._port
+
+    @property
+    def socket_timeout(self):
+        return self._socket_timeout
+
+    @property
+    def service(self):
+        return self._service
+
+    def __repr__(self):
+        return (
+            "DriveHTTPAdapter(host=%r, port=%r, socket_timeout=%r, closed=%r)"
+            % (HOST, self._port, self._socket_timeout, self._closed)
+        )
+
+    # ----- shutdown -------------------------------------------------------
+
+    def close(self, *, timeout=DEFAULT_DRAIN_TIMEOUT_SECONDS):
+        if type(timeout) is bool or not isinstance(timeout, (int, float)):
+            raise ValueError("timeout must be a finite non-negative number")
+        timeout_f = float(timeout)
+        if not math.isfinite(timeout_f) or timeout_f < 0.0:
+            raise ValueError("timeout must be a finite non-negative number")
+
+        with self._close_lock:
+            if self._closed:
+                return True
+
+            deadline = time.monotonic() + timeout_f
+
+            with self._pool_cond:
+                should_close_listener = not self._listener_closed
+                self._listener_closed = True
+                self._draining = True
+                for slot in self._slots:
+                    if slot.conn is not None:
+                        try:
+                            slot.conn.close()
+                        except OSError:
+                            pass
+                        slot.conn = None
+                self._pool_cond.notify_all()
+
+            if should_close_listener:
+                self._wake_listener()
+                if self._listener is not None:
+                    try:
+                        self._listener.close()
+                    except OSError:
+                        pass
+
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                service_closed = self._service.close(timeout=remaining)
+            except BaseException:
+                service_closed = False
+
+            if self._accept_thread is not None:
+                remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    self._accept_thread.join(timeout=remaining)
+                except BaseException:
+                    pass
+
+            for worker in self._workers:
+                remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    worker.join(timeout=remaining)
+                except BaseException:
+                    pass
+
+            accept_done = self._accept_thread is None or not self._accept_thread.is_alive()
+            workers_done = all(not worker.is_alive() for worker in self._workers)
+
+            if service_closed and accept_done and workers_done:
+                self._closed = True
+                return True
+            return False
+
+    def _wake_listener(self):
+        port = self._port
+        if port <= 0:
+            return
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.setblocking(False)
+                sock.connect_ex((HOST, port))
+            finally:
+                sock.close()
+        except Exception:
+            pass
+
+    # ----- accept / worker loops ------------------------------------------
+
+    def _accept_loop(self):
+        while True:
+            with self._pool_lock:
+                if self._draining:
+                    return
+            try:
+                conn, _ = self._listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                with self._pool_lock:
+                    if self._draining:
+                        return
+                # transient; loop with listener timeout
+                continue
+
+            assigned = False
+            with self._pool_cond:
+                if self._draining:
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+                    continue
+                if self._idle_slots:
+                    slot = self._idle_slots.pop()
+                    slot.conn = conn
+                    self._pool_cond.notify_all()
+                    assigned = True
+            if not assigned:
+                self._busy_reject(conn)
+
+    def _worker_loop(self, slot):
+        while True:
+            with self._pool_cond:
+                while slot.conn is None and not self._draining:
