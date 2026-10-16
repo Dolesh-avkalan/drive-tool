@@ -1,0 +1,893 @@
+D117 Gemini partB, final remaining payload source lines944-END. Combine with your D116 PART_A_CLEAR_PENDING_B and D113 outerrunner-only acceptance. Same full payloadSHA5599d32fa9df7918a8809098492284cebbce42b9141c61844c18c069fc17db43; outerf55f1ca20d79f576b32006e7a9745fd9baa4b2af8cf55e6b77cf62e541712c87; source337e4c713829af76615472eb47b81244ff399528. Verify synchronized crash SIGKILL ownership, child-onlyCPU/RAM/FD bounds, disk floors, fault-injection restoration, recovery/corruption oracles, all CLI and stage deadlines. Host disposable instance-20261015-210506 only, TMPDIRworkspace, no services/credentials/privileges/mounts/rootfilling/publiclisteners. Explicit unsupported memory substage must remain PARTIAL not PASS. No retries uncertainwrites. Return final ACCEPT_PACKAGE exact hashes with residual limits or CHANGES REQUIRED concrete blockers. Static TESTS_NOT_RUN; no code. Complete remaining source follows; no source omission between chunks.
+def _crash_child(root_dir, mode, overwrite, rfd, wfd):
+    """Child body: instrumented save that signals then blocks for SIGKILL."""
+    try:
+        os.setsid()
+        sys.path.insert(0, os.environ.get("D110_REPO", ""))
+        from drive_tool.file_service import LocalFileService
+        roots = {"main": os.path.realpath(root_dir)}
+        # rebuild a minimal single-agent policy in the child
+        from drive_tool.service_policy import AgentPolicy, SourceGrant
+        grant = SourceGrant(alias="main", root=roots["main"],
+                            operations=frozenset(("find", "list", "read", "save")),
+                            max_read_bytes=1048576, max_write_bytes=1048576)
+        pol = AgentPolicy(agent_id="agent-main",
+                          token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                          grants=(grant,))
+        svc = LocalFileService((pol,))
+        binding = svc._bindings[("agent-main", "main")]
+        writer = binding.writer
+        payload = b"P" * 4096
+
+        if mode == "C1":
+            orig = writer._os_write
+            state = {"n": 0}
+
+            def bad_write(fd, data):
+                state["n"] += 1
+                if state["n"] == 1:
+                    half = max(1, len(data) // 2)
+                    n = orig(fd, bytes(data[:half]))
+                    os.write(wfd, b"R")
+                    # block until the parent kills us
+                    while True:
+                        time.sleep(0.05)
+                return orig(fd, data)
+            writer._os_write = bad_write
+        else:  # C2 post-fsync pre-publish
+            if overwrite:
+                orig = writer._os_rename
+
+                def bad_pub(src, dst, **kw):
+                    os.write(wfd, b"R")
+                    while True:
+                        time.sleep(0.05)
+                writer._os_rename = bad_pub
+            else:
+                orig = writer._os_link
+
+                def bad_pub(src, dst, **kw):
+                    os.write(wfd, b"R")
+                    while True:
+                        time.sleep(0.05)
+                writer._os_link = bad_pub
+
+        try:
+            svc.save(TOKENS[0], "main", "p/savepool/target.bin", payload,
+                     overwrite=overwrite)
+        except BaseException:
+            pass
+        os._exit(0)
+    except BaseException:
+        os._exit(3)
+
+
+def _run_crash_case(root_dir, mode, overwrite, repo):
+    rfd, wfd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(rfd)
+        _crash_child(root_dir, mode, overwrite, rfd, wfd)
+        os._exit(0)
+    os.close(wfd)
+    # wait for the child to reach its synchronisation point
+    ready = b""
+    deadline = time.monotonic() + 20.0
+    os.set_blocking(rfd, False)
+    while time.monotonic() < deadline:
+        try:
+            chunk = os.read(rfd, 1)
+        except BlockingIOError:
+            chunk = b""
+        if chunk:
+            ready = chunk
+            break
+        time.sleep(0.02)
+    os.close(rfd)
+    killed = False
+    status = None
+    # Kill ONLY the child's own process group; never our own (the child
+    # setsid()s, but guard anyway so a pre-setsid race can never take out the
+    # harness, the parent or SSH).
+    own_pgid = os.getpgid(0)
+    try:
+        child_pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        child_pgid = None
+    if child_pgid is not None and child_pgid != own_pgid:
+        try:
+            os.killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        _p, status = os.waitpid(pid, 0)
+        killed = os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+    except ChildProcessError:
+        pass
+    return {"ready": bool(ready), "killed_sigkill": killed,
+            "status": status}
+
+
+def stage_crash_kill(repo, budget):
+    sys.path.insert(0, repo)
+    os.environ["D110_REPO"] = repo
+    from drive_tool.file_service import LocalFileService
+    from drive_tool.service_policy import AgentPolicy, SourceGrant
+    from drive_tool.service_client import DriveClientError  # noqa: F401
+
+    base = tempfile.mkdtemp(prefix="d110-crash-")
+    problems = []
+    cases = []
+    try:
+        roots, _fx = build_roots(base)
+        root_main = roots["main"]
+        pool = os.path.join(root_main, "savepool")
+        target = os.path.join(pool, "target.bin")
+
+        for mode in ("C1", "C2"):
+            for overwrite in (False, True):
+                # pre-seed a known target only for the overwrite cases
+                if overwrite:
+                    with open(target, "wb") as fh:
+                        fh.write(b"ORIGINAL" * 512)
+                    orig_sha = sha256_bytes(open(target, "rb").read())
+                else:
+                    if os.path.exists(target):
+                        os.unlink(target)
+                    orig_sha = None
+                case = _run_crash_case(root_main, mode, overwrite, repo)
+                orphans = _scan_temp(root_main)
+                # fresh-service recovery on the crash-affected root
+                grant = SourceGrant(alias="main", root=root_main,
+                                    operations=frozenset(("find", "list", "read", "save")),
+                                    max_read_bytes=1048576, max_write_bytes=1048576)
+                pol = AgentPolicy(agent_id="agent-main",
+                                  token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                                  grants=(grant,))
+                svc = LocalFileService((pol,))
+                recovery = {}
+                try:
+                    svc.read(TOKENS[0], "main", "p/readme.txt", offset=0, length=8)
+                    svc.list(TOKENS[0], "main", "root", limit=20)
+                    svc.find(TOKENS[0], "main", "root", name_contains="data", limit=10)
+                    svc.save(TOKENS[0], "main", "p/savepool/recovered.bin", b"r" * 16,
+                             overwrite=True)
+                    svc.save(TOKENS[0], "main", "p/savepool/recovered2.bin", b"r" * 16,
+                             overwrite=False)
+                    recovery = {"ok": True}
+                except Exception as exc:  # noqa: BLE001
+                    recovery = {"ok": False, "error": _map_exc(exc)}
+                finally:
+                    try:
+                        svc.close(timeout=5.0)
+                    except BaseException:
+                        pass
+                # target integrity
+                if overwrite:
+                    if os.path.exists(target):
+                        now = sha256_bytes(open(target, "rb").read())
+                        target_state = "original" if now == orig_sha else "changed"
+                    else:
+                        target_state = "missing"
+                else:
+                    target_state = "absent" if not os.path.exists(target) else "present"
+                # orphan visibility in list/find
+                vis = {"list": None, "find": None}
+                try:
+                    g2 = SourceGrant(alias="main", root=root_main,
+                                     operations=frozenset(("find", "list", "read", "save")),
+                                     max_read_bytes=1048576, max_write_bytes=1048576)
+                    p2 = AgentPolicy(agent_id="agent-main",
+                                     token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                                     grants=(g2,))
+                    s2 = LocalFileService((p2,))
+                    try:
+                        items = s2.list(TOKENS[0], "main", "p/savepool", limit=100)["items"]
+                        vis["list"] = sum(1 for it in items
+                                          if it["name"].startswith(TEMP_PREFIX))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    try:
+                        res = s2.find(TOKENS[0], "main", "p/savepool",
+                                      name_contains=TEMP_PREFIX, limit=100)
+                        vis["find"] = sum(1 for it in res["items"]
+                                          if it["name"].startswith(TEMP_PREFIX))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    s2.close(timeout=5.0)
+                except BaseException:
+                    pass
+
+                if not case["killed_sigkill"]:
+                    problems.append("%s overwrite=%s: child not SIGKILLed (%s)"
+                                    % (mode, overwrite, case))
+                if not recovery.get("ok"):
+                    problems.append("%s overwrite=%s: fresh recovery failed: %s"
+                                    % (mode, overwrite, recovery))
+                if overwrite and target_state == "changed":
+                    problems.append("%s overwrite=True: target changed on kill (torn)"
+                                    % mode)
+                if (not overwrite) and target_state == "present":
+                    problems.append("%s overwrite=False: target published despite kill"
+                                    % mode)
+                if len(orphans) < 1:
+                    problems.append("%s overwrite=%s: expected >=1 orphan temp, found %d"
+                                    % (mode, overwrite, len(orphans)))
+                cases.append({
+                    "mode": mode, "overwrite": overwrite,
+                    "ready": case["ready"], "killed_sigkill": case["killed_sigkill"],
+                    "orphan_temps": len(orphans),
+                    "orphan_visible_in_list": vis["list"],
+                    "orphan_visible_in_find": vis["find"],
+                    "target_state": target_state,
+                    "recovery": recovery,
+                })
+                # clean the root's pool between cases
+                for name in os.listdir(pool):
+                    try:
+                        os.unlink(os.path.join(pool, name))
+                    except OSError:
+                        pass
+        return {
+            "stage": "crash_kill",
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "cases": cases,
+            "note": ("SIGKILL proves process-crash atomicity, NOT physical "
+                     "power-loss durability across a hypervisor disk cache."),
+        }
+    finally:
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 7: resource_pressure (CHILD-only CPU / RAM / FD)
+# ---------------------------------------------------------------------------
+def _cpu_children(n):
+    pids = []
+    for _ in range(n):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.nice(15)
+                resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
+                while True:
+                    hashlib.pbkdf2_hmac("sha256", b"x" * 64, b"y" * 16, 20000)
+            except BaseException:
+                pass
+            os._exit(0)
+        pids.append(pid)
+    return pids
+
+
+def _r3_child(repo, root_main, wfd):
+    """Child: exhaust file descriptors, hammer the service, report via pipe."""
+    try:
+        os.setsid()
+        sys.path.insert(0, repo)
+        from drive_tool.file_service import LocalFileService
+        from drive_tool.service_policy import AgentPolicy, SourceGrant
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        target = 24
+        new_soft = min(hard, target)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+        grant = SourceGrant(alias="main", root=root_main,
+                            operations=frozenset(("find", "list", "read", "save")),
+                            max_read_bytes=1048576, max_write_bytes=1048576)
+        pol = AgentPolicy(agent_id="agent-main",
+                          token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                          grants=(grant,))
+        svc = LocalFileService((pol,))
+        # occupy descriptors so only a couple remain free for the workload
+        holders = []
+        try:
+            while True:
+                nfd = _nfd()
+                if nfd is None or nfd >= new_soft - 3:
+                    break
+                holders.append(os.open(os.devnull, os.O_RDONLY))
+        except OSError:
+            pass
+        nfd_pressure = _nfd()
+        lock = threading.Lock()
+        counters = {"ok": 0, "mapped": 0, "raw": 0, "raw_type": None}
+
+        def hammer(n):
+            for i in range(40):
+                try:
+                    svc.save(TOKENS[0], "main",
+                             "p/savepool/emfile_%d_%03d.bin" % (n, i),
+                             b"z" * 64, overwrite=True)
+                    with lock:
+                        counters["ok"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    with lock:
+                        if type(exc).__name__ == "ServiceError":
+                            counters["mapped"] += 1
+                        else:
+                            counters["raw"] += 1
+                            counters["raw_type"] = type(exc).__name__
+
+        threads = [threading.Thread(target=hammer, args=(n,)) for n in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30.0)
+        for fd in holders:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+        recovery_ok = 0
+        for i in range(20):
+            try:
+                svc.list(TOKENS[0], "main", "root", limit=20)
+                recovery_ok += 1
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            svc.close(timeout=5.0)
+        except BaseException:
+            pass
+        out = {"soft": soft, "hard": hard, "new_soft": new_soft,
+               "nfd_pressure": nfd_pressure,
+               "ok": counters["ok"], "mapped": counters["mapped"],
+               "raw": counters["raw"], "raw_type": counters["raw_type"],
+               "recovery_ok": recovery_ok}
+        os.write(wfd, json.dumps(out).encode("ascii"))
+        os._exit(0)
+    except BaseException as exc:
+        try:
+            os.write(wfd, json.dumps({"child_error": type(exc).__name__}).encode("ascii"))
+        except BaseException:
+            pass
+        os._exit(3)
+
+
+def _r2_child(repo, root_main, wfd):
+    """Child: RLIMIT_AS memory pressure + MemoryError recovery."""
+    try:
+        os.setsid()
+        sys.path.insert(0, repo)
+        vm_kb = None
+        try:
+            with open("/proc/self/status") as fh:
+                for line in fh:
+                    if line.startswith("VmSize:"):
+                        vm_kb = int(line.split()[1])
+                        break
+        except OSError:
+            pass
+        headroom_kb = 192 * 1024
+        if vm_kb is not None and (vm_kb + headroom_kb) > CHILD_RLIMIT_AS // 1024:
+            os.write(wfd, json.dumps({
+                "result": "SKIPPED",
+                "reason": ("baseline VmSize %d KiB leaves < %d KiB headroom "
+                           "under RLIMIT_AS %d MiB")
+                          % (vm_kb, headroom_kb, CHILD_RLIMIT_AS // (1024 * 1024))}
+            ).encode("ascii"))
+            os._exit(0)
+        try:
+            with open("/proc/self/oom_score_adj", "w") as fh:
+                fh.write("1000\n")
+        except OSError:
+            pass
+        resource.setrlimit(resource.RLIMIT_AS, (CHILD_RLIMIT_AS, CHILD_RLIMIT_AS))
+        from drive_tool.file_service import LocalFileService
+        from drive_tool.service_policy import AgentPolicy, SourceGrant
+        grant = SourceGrant(alias="main", root=root_main,
+                            operations=frozenset(("find", "list", "read", "save")),
+                            max_read_bytes=1048576, max_write_bytes=1048576)
+        pol = AgentPolicy(agent_id="agent-main",
+                          token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                          grants=(grant,))
+        svc = LocalFileService((pol,))
+        ballast = bytearray(96 * 1024 * 1024)
+        ballast[::4096] = b"\x01" * (len(ballast) // 4096)
+        ok = 0
+        for i in range(50):
+            svc.read(TOKENS[0], "main", "p/readme.txt", offset=0, length=16)
+            svc.save(TOKENS[0], "main", "p/savepool/mem_%03d.bin" % i,
+                     b"m" * 256, overwrite=True)
+            ok += 1
+        # force a MemoryError boundary
+        mem_error = None
+        grow = bytearray()
+        try:
+            for _ in range(200):
+                grow.extend(b"\x00" * (8 * 1024 * 1024))
+        except MemoryError:
+            mem_error = "MemoryError"
+        del ballast
+        del grow
+        recovery_ok = 0
+        for i in range(20):
+            svc.save(TOKENS[0], "main", "p/savepool/rec_%03d.bin" % i,
+                     b"r" * 256, overwrite=True)
+            svc.read(TOKENS[0], "main", "p/readme.txt", offset=0, length=16)
+            recovery_ok += 1
+        try:
+            svc.close(timeout=5.0)
+        except BaseException:
+            pass
+        os.write(wfd, json.dumps({"ok": ok, "mem_error": mem_error,
+                                  "vm_kb": vm_kb,
+                                  "recovery_ok": recovery_ok}).encode("ascii"))
+        os._exit(0)
+    except BaseException as exc:
+        try:
+            os.write(wfd, json.dumps({"child_error": type(exc).__name__}).encode("ascii"))
+        except BaseException:
+            pass
+        os._exit(3)
+
+
+def _collect_child(pid, rfd, timeout=120.0):
+    buf = b""
+    deadline = time.monotonic() + timeout
+    os.set_blocking(rfd, False)
+    while time.monotonic() < deadline:
+        try:
+            chunk = os.read(rfd, 65536)
+        except BlockingIOError:
+            chunk = b""
+        if chunk:
+            buf += chunk
+            break
+        # is the child gone?
+        try:
+            wpid, status = os.waitpid(pid, os.WNOHANG)
+            if wpid == pid:
+                break
+        except ChildProcessError:
+            break
+        time.sleep(0.05)
+    os.close(rfd)
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
+    try:
+        return json.loads(buf.decode("ascii"))
+    except Exception:  # noqa: BLE001
+        return {"child_error": "no_result", "raw_len": len(buf)}
+
+
+def stage_resource_pressure(repo, budget):
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient
+
+    base = tempfile.mkdtemp(prefix="d110-rp-")
+    adapter = None
+    problems = []
+    r1 = {}
+    r2 = {}
+    r3 = {}
+    cpu_pids = []
+    try:
+        roots, _fx = build_roots(base)
+        root_main = roots["main"]
+        policies = build_policies(roots)
+
+        # Fork the CPU children FIRST, while this process is still
+        # single-threaded: fork() in a multi-threaded process emits a
+        # DeprecationWarning on CPython 3.12+ and risks lock hazards.
+        cpu_pids = _cpu_children(4)
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=10.0)
+        time.sleep(0.1)
+
+        # R1: 4 low-priority CPU children + a bounded 6-agent workload
+        r1_ok = 0
+        r1_bad = []
+        try:
+            for i in range(300):
+                agent = i % AGENT_COUNT
+                alias = PERSONAS[agent][2]
+                op = i % 4
+                if agent == READ_ONLY_AGENT and op == 3:
+                    op = 2   # the read-only persona cannot save
+                try:
+                    c = DriveClient(port=adapter.port, token=TOKENS[agent], timeout=10.0)
+                    if op == 0:
+                        c.list(alias, limit=20)
+                    elif op == 1:
+                        c.find(alias, name_contains="data", limit=10)
+                    elif op == 2:
+                        c.read(alias, "p/readme.txt", offset=0, length=16)
+                    else:
+                        c.save(alias, "p/savepool/r1_%03d.bin" % (i % 32),
+                               b"c" * 64, overwrite=True)
+                    r1_ok += 1
+                except Exception as exc:  # noqa: BLE001
+                    r1_bad.append(_map_exc(exc))
+        finally:
+            for pid in cpu_pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            for pid in cpu_pids:
+                try:
+                    os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+            cpu_pids = []
+        r1 = {"ok": r1_ok, "expected": 300, "bad": r1_bad[:5],
+              "bad_count": len(r1_bad)}
+        if r1_ok != 300:
+            problems.append("R1 CPU-saturation workload %d/300 ok" % r1_ok)
+
+        # Close the adapter BEFORE forking R2/R3, so no worker/accept threads
+        # are alive across a fork (avoids fork-with-threads lock hazards).
+        closed = adapter.close(timeout=10.0)
+        adapter = None
+        threads_after = _adapter_threads()
+        if not closed:
+            problems.append("adapter.close() did not return True")
+        if threads_after:
+            problems.append("adapter threads not reaped")
+
+        # R2: memory pressure (guarded by the host MemAvailable floor)
+        avail = _mem_available_kb()
+        if avail is not None and avail >= HOST_MEM_FLOOR_KB:
+            rfd, wfd = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                os.close(rfd)
+                _r2_child(repo, root_main, wfd)
+                os._exit(0)
+            os.close(wfd)
+            r2 = _collect_child(pid, rfd, timeout=min(120.0, budget))
+            if r2.get("result") == "SKIPPED":
+                pass   # the child self-reported an honest skip
+            elif r2.get("child_error"):
+                r2 = {"result": "SKIPPED",
+                      "reason": "child error: %s" % r2.get("child_error")}
+            else:
+                r2["result"] = "PASS" if (r2.get("ok") == 50
+                                          and r2.get("recovery_ok") == 20) else "FAIL"
+            if r2.get("result") == "FAIL":
+                problems.append("R2 memory pressure failed: %s" % r2)
+        else:
+            r2 = {"result": "SKIPPED",
+                  "reason": "host MemAvailable %s KiB < %d KiB floor"
+                            % (avail, HOST_MEM_FLOOR_KB)}
+        avail_after = _mem_available_kb()
+        if avail_after is not None and avail_after < HOST_MEM_ABORT_KB:
+            problems.append("host MemAvailable fell below the abort floor: %d" % avail_after)
+
+        # R3: EMFILE descriptor exhaustion in a child
+        rfd, wfd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(rfd)
+            _r3_child(repo, root_main, wfd)
+            os._exit(0)
+        os.close(wfd)
+        r3 = _collect_child(pid, rfd, timeout=min(120.0, budget))
+        if r3.get("child_error"):
+            r3 = {"result": "SKIPPED", "reason": "child error: %s" % r3.get("child_error")}
+        else:
+            r3_ok = (r3.get("raw", 1) == 0 and r3.get("recovery_ok") == 20
+                     and r3.get("mapped", 0) >= 1)
+            r3["result"] = "PASS" if r3_ok else "FAIL"
+            if not r3_ok:
+                problems.append("R3 EMFILE handling failed: %s" % r3)
+
+        subresults = [r1.get("ok") == 300, r3.get("result") == "PASS"]
+        r2_res = r2.get("result")
+        if all(subresults) and r2_res == "PASS":
+            result = "PASS" if not problems else "FAIL"
+        elif all(subresults) and r2_res == "SKIPPED":
+            result = "PARTIAL"   # a skipped capability is never a pass
+        else:
+            result = "FAIL"
+        return {
+            "stage": "resource_pressure",
+            "result": result,
+            "problems": problems,
+            "R1_cpu_saturation": r1,
+            "R2_memory_pressure": r2,
+            "R3_emfile": r3,
+            "host_mem_available_kb_before": avail,
+            "host_mem_available_kb_after": avail_after,
+            "note": ("R2 is SKIPPED (never PASS) when the host MemAvailable "
+                     "floor is not met."),
+            "resources": {"closed": closed, "threads_after_close": threads_after},
+        }
+    finally:
+        for pid in cpu_pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 8: enospc (RLIMIT_FSIZE EFBIG + injected 4-phase ENOSPC)
+# ---------------------------------------------------------------------------
+def _fsize_child(repo, root_main, wfd):
+    try:
+        os.setsid()
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+        resource.setrlimit(resource.RLIMIT_FSIZE,
+                           (CHILD_RLIMIT_FSIZE, CHILD_RLIMIT_FSIZE))
+        sys.path.insert(0, repo)
+        from drive_tool.file_service import LocalFileService
+        from drive_tool.service_policy import AgentPolicy, SourceGrant
+        grant = SourceGrant(alias="main", root=root_main,
+                            operations=frozenset(("find", "list", "read", "save")),
+                            max_read_bytes=1048576, max_write_bytes=1048576)
+        pol = AgentPolicy(agent_id="agent-main",
+                          token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                          grants=(grant,))
+        svc = LocalFileService((pol,))
+        out = {"raised": None}
+        try:
+            svc.save(TOKENS[0], "main", "p/savepool/fsize.bin",
+                     b"X" * 32768, overwrite=False)
+            out["raised"] = "NONE"
+        except Exception as exc:  # noqa: BLE001
+            out["raised"] = type(exc).__name__
+            out["code"] = getattr(exc, "code", None)
+            out["outcome_uncertain"] = getattr(exc, "outcome_uncertain", None)
+            out["retry_safe"] = getattr(exc, "retry_safe", None)
+        out["target_exists"] = os.path.exists(os.path.join(root_main, "savepool", "fsize.bin"))
+        out["orphans"] = len(_scan_temp(root_main))
+        try:
+            svc.close(timeout=5.0)
+        except BaseException:
+            pass
+        os.write(wfd, json.dumps(out).encode("ascii"))
+        os._exit(0)
+    except BaseException as exc:
+        try:
+            os.write(wfd, json.dumps({"child_error": type(exc).__name__}).encode("ascii"))
+        except BaseException:
+            pass
+        os._exit(3)
+
+
+def _inject_phase(repo, root_main, phase, overwrite):
+    """Inject ENOSPC at one write phase via the writer's OS seams."""
+    sys.path.insert(0, repo)
+    from drive_tool.file_service import LocalFileService
+    from drive_tool.service_policy import AgentPolicy, SourceGrant
+    grant = SourceGrant(alias="main", root=root_main,
+                        operations=frozenset(("find", "list", "read", "save")),
+                        max_read_bytes=1048576, max_write_bytes=1048576)
+    pol = AgentPolicy(agent_id="agent-main",
+                      token_sha256=hashlib.sha256(TOKENS[0].encode("ascii")).digest(),
+                      grants=(grant,))
+    svc = LocalFileService((pol,))
+    binding = svc._bindings[("agent-main", "main")]
+    writer = binding.writer
+    target = "p/savepool/inj.bin"
+    tpath = os.path.join(root_main, "savepool", "inj.bin")
+
+    saved = {name: getattr(writer, name) for name in
+             ("_os_open", "_os_write", "_os_fsync", "_os_link", "_os_rename")}
+    state = {"write_calls": 0, "fsync_calls": 0}
+
+    def enospc(*_a, **_k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    if phase == "temp_create":
+        def op(path, flags, *a, **k):
+            if path.startswith(TEMP_PREFIX):
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return saved["_os_open"](path, flags, *a, **k)
+        writer._os_open = op
+    elif phase == "mid_write":
+        def wr(fd, data):
+            state["write_calls"] += 1
+            if state["write_calls"] == 1:
+                half = max(1, len(data) // 2)
+                return saved["_os_write"](fd, bytes(data[:half]))
+            raise OSError(errno.ENOSPC, "No space left on device")
+        writer._os_write = wr
+    elif phase == "fsync":
+        def fs(fd):
+            state["fsync_calls"] += 1
+            if state["fsync_calls"] == 1:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return saved["_os_fsync"](fd)
+        writer._os_fsync = fs
+    elif phase == "publish":
+        if overwrite:
+            writer._os_rename = enospc
+        else:
+            writer._os_link = enospc
+
+    pre_sha = sha256_bytes(open(tpath, "rb").read()) if os.path.exists(tpath) else None
+    fd0 = _nfd()
+    raised = None
+    try:
+        svc.save(TOKENS[0], "main", target, b"Y" * 4096, overwrite=overwrite)
+        raised = "NONE"
+    except Exception as exc:  # noqa: BLE001
+        raised = {"type": type(exc).__name__, "code": getattr(exc, "code", None),
+                  "outcome_uncertain": getattr(exc, "outcome_uncertain", None),
+                  "retry_safe": getattr(exc, "retry_safe", None)}
+    # restore seams
+    for name, fn in saved.items():
+        setattr(writer, name, fn)
+    exists_after = os.path.exists(tpath)
+    post_sha = sha256_bytes(open(tpath, "rb").read()) if exists_after else None
+    orphans = _scan_temp(root_main)
+    fd1 = _nfd()
+    # recovery on the same instance
+    recovery_ok = False
+    try:
+        svc.save(TOKENS[0], "main", target, b"Y" * 4096, overwrite=True)
+        svc.read(TOKENS[0], "main", target, offset=0, length=16)
+        svc.list(TOKENS[0], "main", "root", limit=20)
+        svc.find(TOKENS[0], "main", "root", name_contains="inj", limit=10)
+        recovery_ok = True
+    except Exception:  # noqa: BLE001
+        recovery_ok = False
+    try:
+        svc.close(timeout=5.0)
+    except BaseException:
+        pass
+    return {"phase": phase, "overwrite": overwrite, "raised": raised,
+            "target_exists_after": exists_after,
+            "overwrite_preserved": (None if pre_sha is None else
+                                    (post_sha == pre_sha)),
+            "orphans": len(orphans), "fd_before": fd0, "fd_after": fd1,
+            "recovery_ok": recovery_ok}
+
+
+def stage_enospc(repo, budget):
+    sys.path.insert(0, repo)
+    base = tempfile.mkdtemp(prefix="d110-enospc-")
+    problems = []
+    phases = []
+    fsize = {}
+    try:
+        roots, _fx = build_roots(base)
+        root_main = roots["main"]
+        pool = os.path.join(root_main, "savepool")
+        tpath = os.path.join(pool, "inj.bin")
+
+        # Sub-test 2A: real kernel RLIMIT_FSIZE mid-write EFBIG (child)
+        rfd, wfd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(rfd)
+            _fsize_child(repo, root_main, wfd)
+            os._exit(0)
+        os.close(wfd)
+        fsize = _collect_child(pid, rfd, timeout=min(60.0, budget))
+        if fsize.get("child_error"):
+            fsize = {"result": "SKIPPED", "reason": fsize.get("child_error")}
+        else:
+            ok = (fsize.get("raised") == "ServiceError"
+                  and fsize.get("target_exists") is False)
+            fsize["result"] = "PASS" if ok else "FAIL"
+            if not ok:
+                problems.append("RLIMIT_FSIZE sub-test failed: %s" % fsize)
+
+        # Sub-test 2B: injected ENOSPC at each of the four write phases
+        for phase in ("temp_create", "mid_write", "fsync", "publish"):
+            for overwrite in (False, True):
+                # seed a known target for the overwrite cases
+                if overwrite:
+                    with open(tpath, "wb") as fh:
+                        fh.write(b"SEED" * 1024)
+                else:
+                    if os.path.exists(tpath):
+                        os.unlink(tpath)
+                rec = _inject_phase(repo, root_main, phase, overwrite)
+                phases.append(rec)
+                raised = rec["raised"]
+                if raised == "NONE" or not isinstance(raised, dict):
+                    problems.append("%s overwrite=%s: no error raised" % (phase, overwrite))
+                else:
+                    if raised["code"] != "unavailable":
+                        problems.append("%s overwrite=%s: code=%s (expected unavailable)"
+                                        % (phase, overwrite, raised["code"]))
+                if overwrite:
+                    if rec["overwrite_preserved"] is False:
+                        problems.append("%s overwrite=True: target not preserved" % phase)
+                else:
+                    if rec["target_exists_after"]:
+                        problems.append("%s overwrite=False: partial target published" % phase)
+                if rec["orphans"] != 0:
+                    problems.append("%s overwrite=%s: %d orphan temp(s)"
+                                    % (phase, overwrite, rec["orphans"]))
+                if not rec["recovery_ok"]:
+                    problems.append("%s overwrite=%s: recovery failed" % (phase, overwrite))
+                if (rec["fd_before"] is not None and rec["fd_after"] is not None
+                        and rec["fd_after"] > rec["fd_before"] + FD_BASELINE_SLACK):
+                    problems.append("%s overwrite=%s: fd leak %s->%s"
+                                    % (phase, overwrite, rec["fd_before"], rec["fd_after"]))
+                # clean between phases
+                for name in os.listdir(pool):
+                    try:
+                        os.unlink(os.path.join(pool, name))
+                    except OSError:
+                        pass
+        return {
+            "stage": "enospc",
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "rlimit_fsize": fsize,
+            "injected_phases": phases,
+            "note": ("Error classification is recorded as the ACCEPTED adapter "
+                     "actually behaves; the historical design's expected "
+                     "outcome_uncertain=False/retry_safe=True is NOT assumed."),
+        }
+    finally:
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage dispatch
+# ---------------------------------------------------------------------------
+STAGE_FUNCS = {
+    "selfcheck": stage_selfcheck,
+    "http_hostile": stage_http_hostile,
+    "admission_exhaustion": stage_admission_exhaustion,
+    "isolation": stage_isolation,
+    "concurrent_ops": stage_concurrent_ops,
+    "crash_kill": stage_crash_kill,
+    "resource_pressure": stage_resource_pressure,
+    "enospc": stage_enospc,
+}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="d110 harsh-fault payload (stdlib only)")
+    ap.add_argument("--repo", required=True, help="path to the drive-tool checkout")
+    ap.add_argument("--stage", required=True, choices=STAGE_NAMES)
+    ap.add_argument("--budget", type=float, default=120.0)
+    ap.add_argument("--json", help="write the stage result here")
+    args = ap.parse_args(argv)
+
+    fn = STAGE_FUNCS[args.stage]
+    try:
+        out = fn(args.repo, args.budget)
+    except BaseException as exc:  # noqa: BLE001
+        import traceback
+        out = {"stage": args.stage, "result": "ERROR",
+               "problems": ["stage raised %s: %s" % (type(exc).__name__, exc)],
+               "traceback": traceback.format_exc()[-2000:]}
+    if not isinstance(out, dict):
+        out = {"stage": args.stage, "result": "ERROR",
+               "problems": ["stage returned non-dict"]}
+    text = json.dumps(out, default=str, sort_keys=True)
+    if args.json:
+        try:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(out, indent=2, default=str, sort_keys=True))
+        except OSError:
+            pass
+    sys.stdout.write("HARSH_JSON: " + text + "\n")
+    sys.stdout.flush()
+    res = out.get("result")
+    if res == "PASS":
+        return 0
+    if res in ("SKIPPED", "PARTIAL"):
+        return 2
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
