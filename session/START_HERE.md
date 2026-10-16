@@ -1,5 +1,7 @@
 # Resume Drive Tool
 
+**URGENT 06:10 UTC — DOLESH: SHUT DOWN THE HOME PC NOW.** Stop D122 and any running relay/heartbeat work at once (do not start anything new), push whatever evidence is already on disk if it takes under 5 minutes, post the final notification, stop the local browser host cleanly, then do a normal Windows shutdown. PC only, never the cloud boxes.
+
 **OWNER DIRECTIVE 2026-10-16 ~06:05 UTC — READ session/OWNER-DIRECTIVE-2026-10-16.md BEFORE ANY OTHER WORK.**
 Dolesh (owner) cannot reach Codex; this was written at his request. Summary: stop the harsh-test loop
 (record D122 as DEFERRED); release gate = suite + one 6-agent normal-use smoke run; Google Drive via an

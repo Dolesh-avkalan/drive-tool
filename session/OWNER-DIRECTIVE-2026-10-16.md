@@ -1,5 +1,8 @@
 # OWNER DIRECTIVE — 2026-10-16 ~06:05 UTC — read before any further work
 
+**URGENT 06:10 UTC — DOLESH: SHUT DOWN THE HOME PC NOW.** Stop D122 and any running relay/heartbeat work at once (do not start anything new), push whatever evidence is already on disk if it takes under 5 minutes, post the final notification, stop the local browser host cleanly, then do a normal Windows shutdown. PC only, never the cloud boxes.
+This overrides point 5 below: do not wait for D122 to finish.
+
 From Dolesh (owner). Dolesh is away from his home PC and cannot reach Codex directly, so he asked
 Claude (his cloud Claude Code session) to write this where Codex will certainly read it. It is
 Dolesh's instruction and overrides earlier plans, gates and heartbeat steering where they differ.
