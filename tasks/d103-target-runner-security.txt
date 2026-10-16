@@ -1,0 +1,1908 @@
+D103 Gemini final TARGET runner security review, staticTESTS_NOT_RUN. ExactACTUALpublishedcore dropc29e3a2 drive-tool/module-006/d104-target-http-runner-summary/ (runner+gate+README). Candidate337e4c713829af76615472eb47b81244ff399528. RunnerSHA2564eaf7f530bb25646e2c58e61d05eded952fdf53172f2db212c4e43945d72fdbf, exactD101gate3754ca19b4a72797ac16a1e32300ddf399e7117e2dec63def6693d2512db8d7b. D104sandboxevidencejobstillfinishing; noexecutedtestclaim. Review actualcore safe bootstrap ONLYdisposableinstance-20261015-210506, no credentials/realroots/cloudAPI/publicbinding/install/servicechanges. Strict/tmp0700unique workspace, immutableallimportablesourceidentity/archivehash/gatepayload beforeexecute, traversal/link/size/extracodeguards, output/resource/processgroup/absolute-stage-overalltimeouts, symlinkmanifest/cleanupcontainment. Source/gate581/full60010000 realHTTP fixturesonly, bounded128MiB/32MiB/6ops,20minhardouter. Fullsuite3onlydocumentedcontrolskips, no adaptermissing/platformskipmasking; gateaggregateexitfailclosed. CLIoverridescannotbypassscope. Refuseunknowncode notmerelywarn. ACCEPT/CHANGES REQUIRED withconcreteblockingcounterexamples, no newfeatures/harsh extension/rewrite. PriorD065findingsstayresolved. Ifaccepted specifyexacthashes safe tobootstrap/residuallimits, noOS/syscallcancel guarantee. Directorlaunchespinnedrunner/returnsrawlogs. Core follows.
+FILE run_target_http.py atdropc29e3a2
+#!/usr/bin/env python3
+"""d104 pinned target HTTP runner (stdlib only).
+
+Purpose
+-------
+Run the exact D102 final HTTP candidate (Dolesh-avkalan/drive-tool @
+337e4c713829af76615472eb47b81244ff399528) on a disposable Debian / CPython
+target instance, and gate acceptance on:
+
+  (1) the full committed test suite -> 581 tests, OK, skipped=3, raw exit 0.
+      The three skips are exactly the documented adapter-present control and
+      the two smoke/soak opt-ins. Any other skip -- in particular any
+      platform- or adapter-missing skip -- is a FAIL (no skip masking).
+  (2) the exact D101 final HTTP gate (http_gate_d101.py --gate) -> raw exit 0
+      with selfcheck + smoke600 + soak10000 + saturation_6plus1 all executed
+      and PASS, buckets 580+20 / 9680+320 / 300+50, zero unexpected_other_error
+      and zero unexpected_unavailable, and all resource bounds clean.
+
+It reuses the D098 runner containment / identity / archive / resource patterns
+and adds NO generic remote shell and NO unrelated framework. It executes only a
+fixed allow-list of actions: environment capture, pinned-archive acquisition,
+hash verification, the committed suite and the D101 gate.
+
+Safety
+------
+* stdlib only; no third-party import, no credential, no cloud API, no install,
+  no reboot, no service/public binding, no real root, no deploy.
+* execution is confined to a NEW unique workspace under /tmp (realpath
+  validated, mode 0700). The default base /tmp is allowed, but the workspace
+  must be a strict descendant of it -- never the base itself. Evidence is
+  retained (no cleanup).
+* TMPDIR lives inside the workspace; bytecode writing is disabled.
+* every executable source/test/importable file is re-hashed and checked against
+  the embedded pinned blob sha1 + sha256 BEFORE anything is executed.
+  Unexpected importable/executable files anywhere, any unexpected drive_tool/
+  or tests/ file, symlinks, path traversal, oversize members and oversize
+  totals are rejected fail-closed.
+* the gate payload http_gate_d101.py sha256 is verified before execution.
+* finite per-stage timeouts, an overall deadline, and a hard outer operator
+  timeout (< 20 min). Subprocess capture is byte-capped and a timeout kills the
+  whole process group.
+* acceptance stages stop on the first failure; the overall exit is strictly
+  nonzero on any FAIL / missing / skip / error / timeout.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import shutil
+import signal
+import subprocess
+import sys
+import tarfile
+import tempfile
+import threading
+import time
+import unicodedata
+
+# ---------------------------------------------------------------------------
+# Pins (frozen)
+# ---------------------------------------------------------------------------
+OWNER = "Dolesh-avkalan"
+REPO = "drive-tool"
+COMMIT = "337e4c713829af76615472eb47b81244ff399528"
+COMMIT8 = COMMIT[:8]
+ARCHIVE_URL = "https://codeload.github.com/%s/%s/tar.gz/%s" % (OWNER, REPO, COMMIT)
+ARCHIVE_TOP = "drive-tool-%s" % COMMIT
+
+# The exact D101 corrected gate harness this runner drives. Verified before use.
+GATE_SHA256 = "3754ca19b4a72797ac16a1e32300ddf399e7117e2dec63def6693d2512db8d7b"
+GATE_FILENAME = "http_gate_d101.py"
+
+# Composite source hash of the two accepted HTTP overlay files (adapter||test).
+SOURCEHASH = "b8b44c4c056e1925957445cc9b532c53194920124a469df54e49053a7dcbb71c"
+
+# The committed suite expectation (D102).
+EXPECTED_SUITE_TESTS = 581
+EXPECTED_SKIPS = 3
+ALLOWED_SKIP_IDS = frozenset({
+    "test_http_adapter.SmokeSoakGateContractTests.test_helper_raises_without_production_adapter",
+    "test_http_adapter.SmokeSoakGateTests.test_stage_smoke_600",
+    "test_http_adapter.SmokeSoakGateTests.test_stage_soak_10000",
+})
+
+# The D101 gate expectation (D102 frozen counts).
+GATE_STAGES = ("selfcheck", "smoke600", "soak10000", "saturation_6plus1")
+GATE_EXPECTED_BUCKETS = {
+    "smoke": {"valid_below_capacity_success": 580, "expected_readonly_denial": 20},
+    "soak": {"valid_below_capacity_success": 9680, "expected_readonly_denial": 320},
+    "saturation": {"valid_below_capacity_success": 300, "expected_saturation_busy": 50},
+}
+
+# ---------------------------------------------------------------------------
+# Resource bounds
+# ---------------------------------------------------------------------------
+MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+MAX_TOTAL_UNCOMPRESSED = 64 * 1024 * 1024
+MAX_FILE_BYTES = 5 * 1024 * 1024
+MAX_MEMBERS = 2000
+MAX_WORKSPACE_BYTES = 128 * 1024 * 1024   # <= 128 MiB workspace (hard gate)
+MAX_FIXTURE_BYTES = 32 * 1024 * 1024      # <= 32 MiB new fixture data
+MAX_CONCURRENT = 6                        # <= 6 concurrent operations
+MIN_FREE_BYTES = 20 * 1024 * 1024
+MAX_SUBPROCESS_OUTPUT = 8 * 1024 * 1024   # byte cap on captured stdout+stderr
+
+EXECUTABLE_EXTS = (".py", ".pyc", ".pyo", ".pth", ".so", ".sh", ".bash", ".pyw")
+EXECUTABLE_NAMES = ("sitecustomize.py", "usercustomize.py")
+
+DEFAULT_SUITE_TIMEOUT = 300
+DEFAULT_GATE_TIMEOUT = 600
+DEFAULT_OVERALL_DEADLINE = 1080           # < 20 min (1200 s) hard outer timeout
+DEFAULT_DOWNLOAD_TIMEOUT = 120
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------------------------------------------------------------
+# Pinned importable/executable source & test manifest.
+# Every file under drive_tool/ and tests/ is expected to be one of these.
+# Any unexpected file in those dirs, or any unexpected importable/executable
+# file anywhere, is rejected fail-closed.
+# ---------------------------------------------------------------------------
+EXPECTED_BLOBS = {
+    "drive_tool/__init__.py": ("9be841b5749acb36c5e362c84b986d98292bae8d", "c73aefd5a746d624eaf1abcd3eb978b32b20183292489b711d1e29576fb5aa62", 539),
+    "drive_tool/file_service.py": ("b7e18c606f45066cd54ec66016e70e797486ef50", "befe20bba64252d5595ac68e4af8459f4d8686dd31d14f5bfbf5159fa8b56f8c", 21555),
+    "drive_tool/http_adapter.py": ("41279e6290617968c3b4f3f91fc3cf9a7dab505a", "3ed13cfa7960854382577c9e0982d3ba116833793a6430d141732ccac89c020c", 40881),
+    "drive_tool/listing.py": ("28dddd549c068b00b149a16ad9820445b8af7946", "7a125e899124a1e1a3251f1e949d143b7f08fc89d71ff6ea906284abf0456734", 4750),
+    "drive_tool/local.py": ("74a45c61d3ea9c6e64005b1d92834fed17323d62", "8d382347a4d1118440d364c693624de54883d517376779076c753672818ee2b7", 64638),
+    "drive_tool/local_write.py": ("9824052f349e94f87ee65215ab96e979b4d2a021", "8a53c8467f5367d9617fd165cebdb0382adbc1ecdcb7a8568af902f6a20585ca", 21701),
+    "drive_tool/search.py": ("f2d8407df8a98bb92972eecb7e43e653246d4b1a", "7a03793c05abf58e9f4558d2388ee892715f9ea5fb346e108b9411d0544230b6", 14835),
+    "drive_tool/service_client.py": ("d04c637de7b7ed2b9be78d5b18fde60519f71579", "03c009ca1635be9a210c7ba3d2aa55cf90d4f64af8d6021a414294c94468a791", 21886),
+    "drive_tool/service_policy.py": ("3e58f99ab4ad0286838743b25cef138638131305", "8feedd9499f52df32449acb4ce8d1d2e2a32e7cbf7d5ab2bed2f1a8547d9aa1c", 8575),
+    "drive_tool/storage.py": ("3f4f8dcf50bbf68e97cd807fe40db1ee1bec4576", "422f22fb7e38e9a1dc51e4e3e88868dfc0c77f292dc759801aff93a9c945c6d2", 13718),
+    "tests/test_enumeration.py": ("f7e1eef00de1d82fca7001b64a6af9cfc6d1e667", "4d53a946211d2673ef3cd8176dc62b4810f3c7bad8f1c52802ac283cb121dc69", 11474),
+    "tests/test_enumeration_proofs.py": ("e18e02c2252c52a46ef97e733f50ecbcec422878", "ef1a6c8b243851c8ce1d857a81637fe03d22ded1c2c0ddf677467b46ca8ea750", 8388),
+    "tests/test_file_service.py": ("8b5248f9365d8cac6e1331bb4677dea48a1778ff", "855df6ef02139f003cf7cfd26ccd1c43bce52b14e332c774f23a6de2917ad8dc", 31955),
+    "tests/test_http_adapter.py": ("7a7be06d5ef0e25d0ac54e11bc5909cda27500d3", "b678744759bd53c3dc992e215fc7e98cd5df869c381addbaaa2bfb15e2b87dbf", 76436),
+    "tests/test_listing.py": ("8287db88a4b7ff8d956c082e8150c8d169f0f4f7", "d036ddb160dff53c955916ab712af6f2e8d23a5972b378c33882cf2d5d311e98", 12497),
+    "tests/test_local.py": ("b3319752edaf92a02993981fcc62d63f63ebb408", "3ba0e56f434651b3b5d4134a596ee7936650237102d3624b45c69eeb45019265", 68356),
+    "tests/test_local_range.py": ("7fa3f80e97e84d8c8e7ff57c9cf2a950d5534fa9", "59651dfac93992563d1e5205a6762f0c435adf3d0d176ec92209ab7ab38b4555", 41910),
+    "tests/test_local_range_proofs.py": ("d217e66b72a40de3bbc042f199db1ab25da341ba", "63a7deb685f2761ec510ed895018e90f82166d6e44f0f55696bc2eca85ca81c7", 17275),
+    "tests/test_local_write.py": ("85e7bf06357c16ebf499294de9b116fb909e07db", "3b220d279d3895986ac3d4421e5701a58e5e7051ba8b302f49870efed771216e", 26064),
+    "tests/test_local_write_proofs.py": ("6abf5f1b4bceae58877cb29182f685f71cd4343c", "7dae581e0eb9d8eca7b94931074dc36bf60190027d07d789a8c943093cd5c69d", 7519),
+    "tests/test_partial_scan.py": ("ca73b0704a13d03e09f28a44c86f52ee76478dec", "39f1ec6470611fbb3c2fa5335725bec087196fc9ac8c41614c36f3321d87e444", 28656),
+    "tests/test_partial_scan_proofs.py": ("51c990bc26661d98498086371be47cd08764be56", "fb7c6b217b7db603dc9630fb3d9648598f6dc2a7594c31f2fd804d0e86b4145b", 14284),
+    "tests/test_partial_scan_review_fixes.py": ("c01003e7015915db3dcac15a168ff7aae3d423db", "4da34a8a5ce25771befa6dc19159992439a79326e1c5450ea3e6533749bfac97", 18702),
+    "tests/test_readonly_core.py": ("1b0f746fd8162a9d27691abf7f5a90492548c4d8", "841af8ad17607cef984acfe380c0c8d5879b8b1266f39fa014f0d1559719e2ca", 11579),
+    "tests/test_search.py": ("2ef9c5b8f97a9aa1ff912d250612b8fdb53cad29", "b1d4a0848516a5d0349de6c8d428060b324da48ab85e2bd0cee898c57ae1d49d", 19265),
+    "tests/test_service_client.py": ("41d94d6ba0a184943ff6c80e1acc3d920ce18034", "e10d6145bdaf52f54edd84cd8e693dd7c39a392c8aeca7bc10915b65ef8ae4f4", 51167),
+    "tests/test_service_policy.py": ("97bbf75bd967c29a9558514332e12bd3c908e7b9", "ada2c59e46cab5cc6b188b8d1ddefa9a25cfebe7d40e64df3ad65b3d5501959b", 19732),
+    "tests/test_storage.py": ("2126dde7f32b7c0cd4d1e737ff990ab10954caf5", "2aa54aedddee1edd680d97e3c58e1a5a3c6d6c8604bcfd58c99138c971212ce9", 10406),
+}
+
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+def log(msg=""):
+    sys.stderr.write(str(msg) + "\n")
+    sys.stderr.flush()
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def git_blob_sha1(data):
+    h = hashlib.sha1()
+    h.update(b"blob %d\0" % len(data))
+    h.update(data)
+    return h.hexdigest()
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def free_bytes(path):
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def dir_allocated_size(path):
+    total = 0
+    for dp, dn, fn in os.walk(path):
+        for name in fn:
+            p = os.path.join(dp, name)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            total += st.st_blocks * 512
+    return total
+
+
+def _kill_group(p):
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            p.kill()
+        except OSError:
+            pass
+
+
+def run(cmd, cwd, env, timeout, max_output=MAX_SUBPROCESS_OUTPUT):
+    """Run cmd in its own process group; capture byte-capped output; kill the
+    whole group on timeout. Returns (rc, output_bytes, timed_out)."""
+    p = subprocess.Popen(cmd, cwd=cwd, env=env,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         start_new_session=True)
+    buf = bytearray()
+    lock = threading.Lock()
+
+    def reader():
+        while True:
+            b = p.stdout.read(65536)
+            if not b:
+                break
+            with lock:
+                if len(buf) < max_output:
+                    buf.extend(b[:max_output - len(buf)])
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    timed_out = False
+    try:
+        rc = p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(p)
+        try:
+            rc = p.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            rc = -9
+        timed_out = True
+    t.join(timeout=5)
+    try:
+        p.stdout.close()
+    except Exception:
+        pass
+    with lock:
+        out = bytes(buf)
+    return rc, out, timed_out
+
+
+# ---------------------------------------------------------------------------
+# Workspace (strict /tmp-only, 0700, new, retained)
+# ---------------------------------------------------------------------------
+def make_workspace(base_dir, workdir):
+    base = os.path.realpath(base_dir)
+    tmp_real = os.path.realpath("/tmp")
+    # base must resolve under /tmp (or be /tmp itself)
+    if not (base == tmp_real or base.startswith(tmp_real + os.sep)):
+        raise SystemExit("base-dir must resolve under %s (got %s)" % (tmp_real, base))
+    if workdir:
+        ws = os.path.realpath(workdir)
+        if not os.path.isdir(ws):
+            raise SystemExit("workdir does not exist: %s" % ws)
+        if not (ws.startswith(base + os.sep)):
+            raise SystemExit("workdir must be a descendant of base-dir (never base itself)")
+    else:
+        uniq = "%d-%d" % (os.getpid(), int(time.time() * 1000) % 1000000)
+        ws = os.path.join(base, "d104-%s-%s" % (COMMIT8, uniq))
+        if os.path.exists(ws):
+            raise SystemExit("workspace already exists: %s" % ws)
+        os.makedirs(ws, mode=0o700)
+        os.chmod(ws, 0o700)
+    if not (ws.startswith(base + os.sep)):
+        raise SystemExit("workspace escaped base-dir")
+    mode = os.stat(ws).st_mode & 0o777
+    if mode != 0o700:
+        raise SystemExit("workspace mode is %o, expected 0700" % mode)
+    return ws
+
+
+def build_env(ws, src):
+    env = dict(os.environ)
+    tmp = os.path.join(ws, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    env["TMPDIR"] = tmp
+    env["TEMP"] = tmp
+    env["TMP"] = tmp
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONHASHSEED"] = "0"
+    env["PYTHONNOUSERSITE"] = "1"
+    env.pop("PYTHONPATH", None)
+    if src:
+        env["PYTHONPATH"] = src
+    return env
+
+
+# ---------------------------------------------------------------------------
+# Archive acquisition + safe extraction
+# ---------------------------------------------------------------------------
+def acquire_archive(archive, dest, deadline, download_timeout):
+    if archive:
+        src = os.path.realpath(archive)
+        if not os.path.isfile(src):
+            raise SystemExit("archive not found: %s" % src)
+        if os.path.getsize(src) > MAX_ARCHIVE_BYTES:
+            raise SystemExit("archive exceeds %d bytes" % MAX_ARCHIVE_BYTES)
+        shutil.copyfile(src, dest)
+        return "local:%s" % src
+    remaining = max(5, min(download_timeout, int(deadline - time.monotonic())))
+    cmd = ["curl", "-fsSL", "--max-time", str(remaining),
+           "--retry", "2", "-o", dest, ARCHIVE_URL]
+    rc, out, to = run(cmd, os.path.dirname(dest), dict(os.environ), remaining + 10)
+    if rc != 0 or to:
+        raise SystemExit("archive download failed rc=%s timeout=%s: %s"
+                         % (rc, to, out[-400:].decode("utf-8", "replace")))
+    if os.path.getsize(dest) > MAX_ARCHIVE_BYTES:
+        raise SystemExit("downloaded archive exceeds %d bytes" % MAX_ARCHIVE_BYTES)
+    return "download:%s" % ARCHIVE_URL
+
+
+def safe_extract(tar_path, dest):
+    os.makedirs(dest, mode=0o700, exist_ok=True)
+    members = []
+    total = 0
+    with tarfile.open(tar_path, "r:gz") as tar:
+        allm = tar.getmembers()
+        if len(allm) > MAX_MEMBERS:
+            raise SystemExit("archive has %d members > %d" % (len(allm), MAX_MEMBERS))
+        for m in allm:
+            name = m.name
+            # reject absolute paths and traversal
+            if name.startswith("/") or os.path.isabs(name):
+                raise SystemExit("absolute member path: %s" % name)
+            parts = name.split("/")
+            if any(p == ".." for p in parts):
+                raise SystemExit("path traversal member: %s" % name)
+            # reject ALL links and special files
+            if m.issym() or m.islnk():
+                raise SystemExit("link member rejected: %s" % name)
+            if not (m.isdir() or m.isfile()):
+                raise SystemExit("special member rejected: %s" % name)
+            if m.isfile():
+                if m.size > MAX_FILE_BYTES:
+                    raise SystemExit("member %s exceeds %d bytes" % (name, MAX_FILE_BYTES))
+                total += m.size
+                if total > MAX_TOTAL_UNCOMPRESSED:
+                    raise SystemExit("uncompressed total exceeds %d bytes" % MAX_TOTAL_UNCOMPRESSED)
+            members.append(m)
+        for m in members:
+            target = os.path.join(dest, m.name)
+            real = os.path.realpath(target)
+            if not (real == os.path.realpath(dest) or real.startswith(os.path.realpath(dest) + os.sep)):
+                raise SystemExit("member escapes extract dir: %s" % m.name)
+            if m.isdir():
+                os.makedirs(target, mode=0o700, exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
+                f = tar.extractfile(m)
+                data = f.read() if f else b""
+                with open(target, "wb") as out:
+                    out.write(data)
+                os.chmod(target, 0o600)
+    return total
+
+
+# ---------------------------------------------------------------------------
+# Identity verification (fail-closed)
+# ---------------------------------------------------------------------------
+def verify_identities(src, expected):
+    """Recompute + verify every executable source/test/importable file."""
+    problems = []
+    seen = set()
+    expected_paths = set(expected.keys())
+    for dp, dn, fn in os.walk(src):
+        for name in fn:
+            p = os.path.join(dp, name)
+            rel = os.path.relpath(p, src)
+            try:
+                st = os.lstat(p)
+            except OSError as e:
+                problems.append("cannot stat %s: %s" % (rel, e))
+                continue
+            import stat as _stat
+            if _stat.S_ISLNK(st.st_mode):
+                problems.append("symlink present in source: %s" % rel)
+                continue
+            if not _stat.S_ISREG(st.st_mode):
+                problems.append("non-regular file in source: %s" % rel)
+                continue
+            base = os.path.basename(rel)
+            importable = base.endswith(EXECUTABLE_EXTS) or base in EXECUTABLE_NAMES
+            under_dt = rel.startswith("drive_tool" + os.sep) or rel == "drive_tool"
+            under_ts = rel.startswith("tests" + os.sep) or rel == "tests"
+            if rel in expected_paths:
+                seen.add(rel)
+                data = open(p, "rb").read()
+                blob = git_blob_sha1(data)
+                sha = sha256_bytes(data)
+                eblob, esha, esize = expected[rel]
+                if len(data) != esize:
+                    problems.append("size mismatch %s: %d != %d" % (rel, len(data), esize))
+                if blob != eblob:
+                    problems.append("blob mismatch %s: %s != %s" % (rel, blob, eblob))
+                if sha != esha:
+                    problems.append("sha256 mismatch %s: %s != %s" % (rel, sha, esha))
+                continue
+            if under_dt or under_ts:
+                problems.append("unexpected file under drive_tool/ or tests/: %s" % rel)
+                continue
+            if importable:
+                problems.append("unexpected importable/executable file: %s" % rel)
+                continue
+    for rel in expected_paths:
+        if rel not in seen:
+            problems.append("expected file missing: %s" % rel)
+    return problems
+
+
+def verify_gate_payload(path):
+    if not os.path.isfile(path):
+        return ["gate payload not found: %s" % path]
+    got = sha256_file(path)
+    if got != GATE_SHA256:
+        return ["gate payload sha256 mismatch: %s != %s" % (got, GATE_SHA256)]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Suite parsing + skip audit
+# ---------------------------------------------------------------------------
+def parse_suite(text):
+    ran = None
+    skipped_ids = []
+    failed = False
+    for line in text.splitlines():
+        ls = line.strip()
+        if ls.startswith("Ran ") and " test" in ls:
+            try:
+                ran = int(ls.split()[1])
+            except (ValueError, IndexError):
+                pass
+        if " ... skipped " in line:
+            head = line.split(" ... skipped ", 1)[0].strip()
+            if "(" in head and head.endswith(")"):
+                tid = head[head.rindex("(") + 1:-1].strip()
+            else:
+                tid = head.split(" ", 1)[0]
+            skipped_ids.append(tid)
+        if ls.startswith("FAILED") or ls == "FAILED" or "FAILED (" in ls:
+            failed = True
+        if ls.startswith("ERROR") and "=" in ls:
+            failed = True
+    return ran, skipped_ids, failed
+
+
+def suite_ok(rc, out, timed_out):
+    text = out.decode("utf-8", "replace")
+    ran, skips, failed = parse_suite(text)
+    problems = []
+    if timed_out:
+        problems.append("suite timed out")
+    if rc != 0:
+        problems.append("suite raw exit %s (expected 0)" % rc)
+    if ran != EXPECTED_SUITE_TESTS:
+        problems.append("suite ran %s tests (expected %d)" % (ran, EXPECTED_SUITE_TESTS))
+    if failed:
+        problems.append("suite reported FAILED/ERROR")
+    if len(skips) != EXPECTED_SKIPS:
+        problems.append("suite skipped %d (expected %d)" % (len(skips), EXPECTED_SKIPS))
+    unexpected = [s for s in skips if s not in ALLOWED_SKIP_IDS]
+    if unexpected:
+        problems.append("unexpected/ masked skips: %s" % unexpected)
+    return problems, {"ran": ran, "skips": skips, "failed": failed,
+                      "raw_exit": rc, "timed_out": timed_out}
+
+
+def gate_ok(rc, out, timed_out, json_path):
+    problems = []
+    if timed_out:
+        problems.append("gate timed out")
+    if rc != 0:
+        problems.append("gate raw exit %s (expected 0)" % rc)
+    data = None
+    if os.path.isfile(json_path):
+        try:
+            data = json.load(open(json_path))
+        except Exception as e:
+            problems.append("gate json unreadable: %s" % e)
+    else:
+        problems.append("gate json missing: %s" % json_path)
+    if data is not None:
+        if data.get("result") != "PASS":
+            problems.append("gate result != PASS (%s)" % data.get("result"))
+        if list(data.get("executed", [])) != list(GATE_STAGES):
+            problems.append("gate executed != required stages: %s" % data.get("executed"))
+        if data.get("problems"):
+            problems.append("gate problems: %s" % data.get("problems"))
+        for stage in ("smoke", "soak", "saturation"):
+            st = data.get(stage) or {}
+            if st.get("result") != "PASS":
+                problems.append("gate stage %s != PASS" % stage)
+            buckets = st.get("buckets") or {}
+            if buckets.get("unexpected_other_error", 0) != 0:
+                problems.append("gate %s unexpected_other_error=%s" % (stage, buckets.get("unexpected_other_error")))
+            if buckets.get("unexpected_unavailable", 0) != 0:
+                problems.append("gate %s unexpected_unavailable=%s" % (stage, buckets.get("unexpected_unavailable")))
+            for k, v in GATE_EXPECTED_BUCKETS.get(stage, {}).items():
+                if buckets.get(k) != v:
+                    problems.append("gate %s bucket %s=%s (expected %s)" % (stage, k, buckets.get(k), v))
+        sc = data.get("selfcheck") or {}
+        if sc.get("result") != "PASS":
+            problems.append("gate selfcheck != PASS")
+    return problems, data
+
+
+# ---------------------------------------------------------------------------
+# Manifest
+# ---------------------------------------------------------------------------
+def write_manifest(ws, src):
+    rows = []
+    for dp, dn, fn in os.walk(src):
+        for name in sorted(fn):
+            p = os.path.join(dp, name)
+            rel = os.path.relpath(p, src)
+            st = os.lstat(p)
+            if os.path.islink(p):
+                rows.append((rel, st.st_size, "LINK", "LINK"))
+                continue
+            rows.append((rel, st.st_size, git_blob_sha1(open(p, "rb").read()),
+                         sha256_file(p)))
+    path = os.path.join(ws, "source_manifest.tsv")
+    with open(path, "w") as f:
+        for rel, size, blob, sha in sorted(rows):
+            f.write("%s\t%d\t%s\t%s\n" % (rel, size, blob, sha))
+    return path, len(rows)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="d104 pinned target HTTP runner (stdlib only)")
+    ap.add_argument("--archive", help="local candidate tar.gz (else download the pin)")
+    ap.add_argument("--base-dir", default="/tmp", help="workspace base (must resolve under /tmp)")
+    ap.add_argument("--workdir", help="explicit workspace dir (descendant of base, must exist)")
+    ap.add_argument("--python", action="append", default=None,
+                    help="interpreter to run (default: the interpreter running this script)")
+    ap.add_argument("--gate-script", default=os.path.join(HERE, GATE_FILENAME),
+                    help="path to the pinned http_gate_d101.py")
+    ap.add_argument("--json", help="write the run summary to this path")
+    ap.add_argument("--suite-timeout", type=int, default=DEFAULT_SUITE_TIMEOUT)
+    ap.add_argument("--gate-timeout", type=int, default=DEFAULT_GATE_TIMEOUT)
+    ap.add_argument("--overall-deadline", type=int, default=DEFAULT_OVERALL_DEADLINE)
+    ap.add_argument("--download-timeout", type=int, default=DEFAULT_DOWNLOAD_TIMEOUT)
+    ap.add_argument("--quiet", action="store_true")
+    args = ap.parse_args(argv)
+
+    start = time.monotonic()
+    deadline = start + args.overall_deadline
+    pythons = args.python or [sys.executable]
+    summary = {
+        "runner": "d104-target-http-runner",
+        "pin": {"repo": "%s/%s" % (OWNER, REPO), "commit": COMMIT, "archive": ARCHIVE_URL},
+        "sourcehash": SOURCEHASH,
+        "gate_sha256": GATE_SHA256,
+        "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "interpreter": sys.version,
+        "platform": platform.platform(),
+        "pythons": pythons,
+        "stages": {},
+        "problems": [],
+    }
+
+    ws = make_workspace(args.base_dir, args.workdir)
+    summary["workspace"] = ws
+    if not args.quiet:
+        log("[d104] workspace %s" % ws)
+
+    src_root = os.path.join(ws, "src")
+    os.makedirs(src_root, mode=0o700, exist_ok=True)
+    env = build_env(ws, None)
+
+    # 1. acquire + extract the pinned archive
+    arch = os.path.join(ws, "candidate.tar.gz")
+    origin = acquire_archive(args.archive, arch, deadline, args.download_timeout)
+    summary["archive_origin"] = origin
+    summary["archive_bytes"] = os.path.getsize(arch)
+    summary["archive_sha256"] = sha256_file(arch)
+    total_uncompressed = safe_extract(arch, src_root)
+    summary["uncompressed_bytes"] = total_uncompressed
+    src = os.path.join(src_root, ARCHIVE_TOP)
+    if not os.path.isdir(src):
+        # tolerate a differently-named top dir but require exactly one
+        tops = [d for d in os.listdir(src_root) if os.path.isdir(os.path.join(src_root, d))]
+        if len(tops) != 1:
+            raise SystemExit("unexpected archive layout: %s" % tops)
+        src = os.path.join(src_root, tops[0])
+    summary["source_root"] = os.path.relpath(src, ws)
+
+    # 2. identity verification of every executable/importable file
+    id_problems = verify_identities(src, EXPECTED_BLOBS)
+    summary["identity"] = {"checked": len(EXPECTED_BLOBS), "problems": id_problems}
+    if id_problems:
+        summary["problems"].extend("identity: %s" % p for p in id_problems)
+        _finalize(ws, summary, True, args.json)
+        return 1
+
+    # 3. gate payload verification
+    gate_problems = verify_gate_payload(args.gate_script)
+    summary["gate_payload"] = {"path": os.path.relpath(args.gate_script, HERE) if args.gate_script.startswith(HERE) else args.gate_script,
+                               "sha256": GATE_SHA256, "problems": gate_problems}
+    if gate_problems:
+        summary["problems"].extend("gate-payload: %s" % p for p in gate_problems)
+        _finalize(ws, summary, True, args.json)
+        return 1
+
+    # 4. per-interpreter: environment/identity -> suite -> gate
+    overall_fail = False
+    for py in pythons:
+        per = {"python": py, "env": {}, "suite": {}, "gate": {}}
+        penv = build_env(ws, src)
+        # environment/identity capture
+        erc, eout, eto = run([py, "-c",
+                              "import sys,platform,os;print(sys.version);"
+                              "print(platform.platform());print(os.getcwd())"],
+                             src, penv, 30)
+        per["env"] = {"raw_exit": erc, "out": eout.decode("utf-8", "replace").strip()}
+        if erc != 0 or eto:
+            per["env"]["problems"] = ["environment/identity check failed"]
+            overall_fail = True
+            summary["stages"][py] = per
+            continue
+
+        # suite
+        s_remaining = max(5, int(min(args.suite_timeout, deadline - time.monotonic())))
+        log("[d104] %s suite (%ds budget)" % (py, s_remaining))
+        rc, out, to = run([py, "-m", "unittest", "discover", "-s", "tests", "-v"],
+                          src, penv, s_remaining)
+        sp, sinfo = suite_ok(rc, out, to)
+        per["suite"] = sinfo
+        per["suite"]["problems"] = sp
+        per["suite"]["log"] = os.path.relpath(
+            _write_log(ws, "suite_%s.log" % _pytag(py), out), ws)
+        if sp:
+            overall_fail = True
+            summary["stages"][py] = per
+            # acceptance stops here for this interpreter; the gate is not run.
+            continue
+
+        # gate (only if the suite passed)
+        g_remaining = max(5, int(min(args.gate_timeout, deadline - time.monotonic())))
+        gjson = os.path.join(ws, "gate_%s.json" % _pytag(py))
+        glog = os.path.join(ws, "gate_%s.log" % _pytag(py))
+        log("[d104] %s gate (%ds budget)" % (py, g_remaining))
+        grc, gout, gto = run([py, args.gate_script, "--repo", src, "--gate",
+                              "--json", gjson], src, penv, g_remaining)
+        with open(glog, "wb") as f:
+            f.write(gout)
+        gp, gdata = gate_ok(grc, gout, gto, gjson)
+        per["gate"] = {"raw_exit": grc, "timed_out": gto,
+                       "json": os.path.relpath(gjson, ws) if os.path.exists(gjson) else None,
+                       "log": os.path.relpath(glog, ws),
+                       "result": (gdata or {}).get("result"),
+                       "executed": (gdata or {}).get("executed"),
+                       "problems": gp}
+        if gp:
+            overall_fail = True
+        summary["stages"][py] = per
+
+    # 5. resources after + bounds
+    alloc = dir_allocated_size(ws)
+    summary["resources"] = {
+        "workspace_allocated_bytes": alloc,
+        "workspace_limit_bytes": MAX_WORKSPACE_BYTES,
+        "free_bytes": free_bytes(ws),
+        "within_workspace_bound": alloc <= MAX_WORKSPACE_BYTES,
+        "max_concurrent_ops": MAX_CONCURRENT,
+        "elapsed_seconds": round(time.monotonic() - start, 3),
+    }
+    if alloc > MAX_WORKSPACE_BYTES:
+        overall_fail = True
+        summary["problems"].append("workspace %d exceeds %d bytes" % (alloc, MAX_WORKSPACE_BYTES))
+
+    # 6. manifest
+    mpath, mcount = write_manifest(ws, src)
+    summary["manifest"] = {"path": os.path.relpath(mpath, ws), "files": mcount}
+
+    _finalize(ws, summary, overall_fail, args.json)
+    return 1 if overall_fail else 0
+
+
+def _pytag(py):
+    base = os.path.basename(py)
+    for t in ("python3.13", "python3.12", "python3.11", "python3", "python"):
+        if base.startswith(t):
+            return t.replace(".", "")
+    return "py"
+
+
+def _write_log(ws, name, data):
+    p = os.path.join(ws, name)
+    with open(p, "wb") as f:
+        f.write(data)
+    return p
+
+
+def _finalize(ws, summary, failed, json_path):
+    summary["result"] = "FAIL" if failed else "PASS"
+    summary["finished"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    summary["exit"] = 1 if failed else 0
+    path = json_path or os.path.join(ws, "d104_summary.json")
+    try:
+        with open(path, "w") as f:
+            json.dump(summary, f, indent=2, sort_keys=True)
+    except OSError:
+        pass
+    log("[d104] result=%s exit=%d summary=%s" % (summary["result"], summary["exit"], path))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+FILE http_gate_d101.py atdropc29e3a2
+#!/usr/bin/env python3
+"""D096 independent HTTP stress-gate harness (stdlib only).
+
+Separate harness, NOT a production or test file.  It drives the frozen candidate
+adapter (base b962a04df1c5abdb78c37617d3a6adca02d04024) over synthetic roots and
+accounts for every scheduled intent with the D089 orthogonal buckets.
+
+Frozen before any execution
+---------------------------
+schedule seed        0xD096
+smoke600             600 = 580 valid + 20 read-only saves
+soak10000            10000 = 9680 valid + 320 read-only saves
+agents               6 distinct personas, 6 distinct roots
+client leases        5 global, held until response + 55 ms monotonic hold
+saturation           50 cycles x (6 occupiers + 1 excess) = 300 success + 50 busy
+resources            <=128 MiB workspace, <=32 MiB fixtures, fd back to baseline,
+                     7 adapter threads reaped, RSS growth <=64 MiB after warmup,
+                     no temp residue, 900 s outer budget per stage
+
+Accounting buckets (D089)
+-------------------------
+valid_below_capacity_success | expected_readonly_denial | expected_saturation_busy
+| unexpected_unavailable | unexpected_other_error
+
+A busy below capacity, any unavailable, any other unexpected error, or an
+expected bucket that does not match its frozen count is a gate FAIL.  There are
+no blind retries and no error budgets.
+
+Usage
+-----
+  python3 http_gate.py --repo <repo> --stage smoke|soak|saturation|bounded|adversarial
+  python3 http_gate.py --repo <repo> --gate          # selfcheck, smoke, then soak + saturation if smoke passes
+  python3 http_gate.py --selfcheck                   # schedule/accounting checks, no adapter
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import random
+import shutil
+import socket
+import sys
+import tempfile
+import threading
+import time
+
+# --------------------------------------------------------------------------
+# Frozen constants.  Nothing here may be tuned after a run has started.
+# --------------------------------------------------------------------------
+FROZEN_SEED = 0x0D096
+AGENT_COUNT = 6
+
+SMOKE_TOTAL = 600
+SMOKE_VALID = 580
+SMOKE_RO_SAVE = 20
+
+SOAK_TOTAL = 10000
+SOAK_VALID = 9680
+SOAK_RO_SAVE = 320
+
+CLIENT_LEASES = 5
+DRAIN_HOLD_SECONDS = 0.055
+
+SAT_CYCLES = 50
+SAT_OCCUPIERS = 6
+SAT_EXCESS = 1
+
+MAX_WORKSPACE_BYTES = 128 * 1024 * 1024
+MAX_FIXTURE_BYTES = 32 * 1024 * 1024
+FD_BASELINE_SLACK = 2
+EXPECTED_ADAPTER_THREADS = 7
+MAX_RSS_GROWTH_BYTES = 64 * 1024 * 1024
+STAGE_BUDGET_SECONDS = 900
+
+# Agent personas: (label, root_name, alias, operations, read_cap, write_cap)
+PERSONAS = (
+    ("agent-main", "main", "main", ("find", "list", "read", "save"), None, None),
+    ("agent-other", "other", "other", ("find", "list", "read", "save"), None, None),
+    ("agent-small", "small", "small", ("find", "list", "read", "save"), 1024, 1024),
+    ("agent-ro", "ro", "ro", ("find", "list", "read"), None, None),
+    ("agent-alias-a", "alias_a", "shared", ("find", "list", "read", "save"), None, None),
+    ("agent-alias-b", "alias_b", "shared", ("find", "list", "read", "save"), None, None),
+)
+READ_ONLY_AGENT = 3          # index of agent-ro in PERSONAS
+VALID_OPS = ("list", "find", "read", "save")
+
+# Tokens are synthetic and never printed; only a short label is ever reported.
+_TOKENS = (
+    "d096-main-" + "A" * 40,
+    "d096-other-" + "B" * 40,
+    "d096-small-" + "C" * 40,
+    "d096-ro-" + "D" * 40,
+    "d096-alias-a-" + "E" * 40,
+    "d096-alias-b-" + "F" * 40,
+)
+
+
+def token_label(index: int) -> str:
+    """A stable, non-secret label for an agent (never the token itself)."""
+    return "agent%d" % index
+
+
+# --------------------------------------------------------------------------
+# Frozen schedule
+# --------------------------------------------------------------------------
+class Intent:
+    __slots__ = ("seq", "agent", "op", "file_id", "expect")
+
+    def __init__(self, seq, agent, op, file_id, expect):
+        self.seq = seq
+        self.agent = agent
+        self.op = op
+        self.file_id = file_id
+        self.expect = expect          # "ok" | "denied" | "busy"
+
+    def as_dict(self):
+        return {"seq": self.seq, "agent": token_label(self.agent), "op": self.op,
+                "file_id": self.file_id, "expect": self.expect}
+
+
+def frozen_schedule(total=SMOKE_TOTAL, valid=SMOKE_VALID, ro_save=SMOKE_RO_SAVE,
+                    seed=FROZEN_SEED):
+    """Build the frozen, replayable intent schedule.
+
+    Exactly ``ro_save`` intents are dispatched by the read-only persona running
+    ``save`` (expected denial); the remaining ``valid`` intents are authorized
+    operations on their own persona's root (expected OK).
+    """
+    if valid + ro_save != total:
+        raise ValueError("valid + ro_save must equal total")
+    items = []
+    for k in range(ro_save):
+        items.append((READ_ONLY_AGENT, "save", "p/savepool/ro%03d.bin" % k, "denied"))
+    for k in range(valid):
+        agent = k % AGENT_COUNT
+        op = VALID_OPS[k % len(VALID_OPS)]
+        if agent == READ_ONLY_AGENT and op == "save":
+            op = "read"                      # read-only persona cannot write
+        if op == "list":
+            file_id = "root"
+        elif op == "find":
+            file_id = "root"
+        elif op == "read":
+            file_id = "p/readme.txt"      # canonical prefix; the client rejects bare names
+        else:
+            file_id = "p/savepool/v%03d.bin" % (k % 64)
+        items.append((agent, op, file_id, "ok"))
+    random.Random(seed).shuffle(items)
+    return [Intent(i, a, o, f, e) for i, (a, o, f, e) in enumerate(items)]
+
+
+def schedule_fingerprint(intents) -> str:
+    h = hashlib.sha256()
+    for it in intents:
+        h.update(("%d|%d|%s|%s|%s\n" % (it.seq, it.agent, it.op, it.file_id,
+                                        it.expect)).encode("ascii"))
+    return h.hexdigest()
+
+
+def schedule_counts(intents):
+    counts = {"ok": 0, "denied": 0, "busy": 0}
+    per_agent = {}
+    for it in intents:
+        counts[it.expect] += 1
+        per_agent[token_label(it.agent)] = per_agent.get(token_label(it.agent), 0) + 1
+    return counts, per_agent
+
+
+# --------------------------------------------------------------------------
+# Accounting (D089 orthogonal buckets)
+# --------------------------------------------------------------------------
+BUCKETS = ("valid_below_capacity_success", "expected_readonly_denial",
+           "expected_saturation_busy", "unexpected_unavailable",
+           "unexpected_other_error")
+
+
+def classify(expect, status, code, transport_exc):
+    """Map one terminal outcome to exactly one accounting bucket.
+
+    ``expect`` is the frozen pre-dispatch intent: "ok", "denied" (read-only save)
+    or "busy" (deterministic saturation excess probe).
+    """
+    if transport_exc is not None:
+        return "unexpected_unavailable" if code == "unavailable" else "unexpected_other_error"
+    if code == "unavailable":
+        return "unexpected_unavailable"
+    if code == "timeout":
+        return "unexpected_other_error"
+    if expect == "busy":
+        if code == "busy":
+            return "expected_saturation_busy"
+        return "unexpected_other_error"
+    if expect == "denied":
+        if code == "denied":
+            return "expected_readonly_denial"
+        return "unexpected_other_error"       # an RO save that was NOT denied
+    # expect == "ok"
+    if status == 200 and code is None:
+        return "valid_below_capacity_success"
+    return "unexpected_other_error"           # busy below capacity, denied, 5xx
+
+
+def verdict(buckets, expected):
+    """A gate passes only when every bucket matches its frozen count exactly."""
+    problems = []
+    for name in BUCKETS:
+        want = expected.get(name, 0)
+        got = buckets.get(name, 0)
+        if got != want:
+            problems.append("%s: expected %d, got %d" % (name, want, got))
+    return (not problems), problems
+
+
+# --------------------------------------------------------------------------
+# Synthetic roots (bounded)
+# --------------------------------------------------------------------------
+def _write(path, data):
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return len(data)
+
+
+def build_roots(base):
+    """Create six distinct persona roots with bounded fixtures (<=32 MiB total)."""
+    total = 0
+    roots = {}
+    for _label, root_name, _alias, _ops, _rc, _wc in PERSONAS:
+        root = os.path.join(base, "root_" + root_name)
+        os.makedirs(os.path.join(root, "sub"), exist_ok=True)
+        os.makedirs(os.path.join(root, "savepool"), exist_ok=True)
+        total += _write(os.path.join(root, "readme.txt"), b"d096 fixture readme\n" * 4)
+        total += _write(os.path.join(root, "data.bin"), bytes(range(256)) * 16)
+        total += _write(os.path.join(root, "empty.bin"), b"")
+        total += _write(os.path.join(root, "sub", "note.txt"), b"nested note\n")
+        roots[root_name] = os.path.realpath(root)
+    if total > MAX_FIXTURE_BYTES:
+        raise RuntimeError("fixtures exceed the frozen 32 MiB bound")
+    return roots, total
+
+
+def build_policies(roots):
+    from drive_tool.service_policy import AgentPolicy, SourceGrant
+    policies = []
+    for idx, (label, root_name, alias, ops, rc, wc) in enumerate(PERSONAS):
+        grant = SourceGrant(
+            alias=alias,
+            root=roots[root_name],
+            operations=frozenset(ops),
+            max_read_bytes=rc if rc is not None else 1048576,
+            max_write_bytes=wc if wc is not None else 1048576,
+        )
+        policies.append(AgentPolicy(
+            agent_id=label,
+            token_sha256=hashlib.sha256(_TOKENS[idx].encode("ascii")).digest(),
+            grants=(grant,),
+        ))
+    return tuple(policies)
+
+
+# --------------------------------------------------------------------------
+# Drain-aware lease limiter
+# --------------------------------------------------------------------------
+class LeaseLimiter:
+    """K global client leases; each is held until response + a monotonic hold."""
+
+    def __init__(self, capacity, hold_seconds):
+        self._sem = threading.BoundedSemaphore(capacity)
+        self._hold = hold_seconds
+        self.max_held = 0
+        self._lock = threading.Lock()
+        self._held = 0
+
+    def acquire(self):
+        self._sem.acquire()
+        with self._lock:
+            self._held += 1
+            if self._held > self.max_held:
+                self.max_held = self._held
+
+    def release(self, response_ts):
+        wait = (response_ts + self._hold) - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        with self._lock:
+            self._held -= 1
+        self._sem.release()
+
+
+# --------------------------------------------------------------------------
+# Resource / lifecycle accounting
+# --------------------------------------------------------------------------
+def _nfd():
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except OSError:
+        return None
+
+
+def _rss_kb():
+    try:
+        with open("/proc/self/status", "r") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except OSError:
+        return None
+    return None
+
+
+def _adapter_threads():
+    return sorted(t.name for t in threading.enumerate()
+                  if t.name.startswith("drive-http"))
+
+
+def _tree_bytes(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+# --------------------------------------------------------------------------
+# Stage runner
+# --------------------------------------------------------------------------
+def run_stage(repo, total, valid, ro_save, stage, hold=DRAIN_HOLD_SECONDS,
+              leases=CLIENT_LEASES, budget=STAGE_BUDGET_SECONDS):
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient, DriveClientError
+
+    base = tempfile.mkdtemp(prefix="d096-gate-")
+    started = time.monotonic()
+    try:
+        adapter = None
+        roots, fixture_bytes = build_roots(base)
+        policies = build_policies(roots)
+        intents = frozen_schedule(total, valid, ro_save)
+        counts, per_agent = schedule_counts(intents)
+
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=5.0)
+        time.sleep(0.1)                       # warmup before the RSS baseline
+        fd0, rss0 = _nfd(), _rss_kb()
+        threads_live = _adapter_threads()
+
+        limiter = LeaseLimiter(leases, hold)
+        buckets = {name: 0 for name in BUCKETS}
+        records = []
+        lock = threading.Lock()
+        deadline = started + budget
+
+        def worker(shard):
+            local = []
+            for intent in shard:
+                if time.monotonic() > deadline:
+                    break
+                limiter.acquire()
+                t0 = time.monotonic()
+                status = None
+                code = None
+                unc = retry = None
+                transport_exc = None
+                alias = PERSONAS[intent.agent][2]
+                try:
+                    client = DriveClient(port=adapter.port, token=_TOKENS[intent.agent],
+                                         timeout=5.0)
+                    if intent.op == "list":
+                        client.list(alias, limit=20)
+                    elif intent.op == "find":
+                        client.find(alias, name_contains="data", limit=10)
+                    elif intent.op == "read":
+                        client.read(alias, intent.file_id, offset=0, length=64)
+                    else:
+                        client.save(alias, intent.file_id, b"x" * 8, overwrite=True)
+                    status = 200
+                except DriveClientError as exc:
+                    code = exc.code
+                    unc = exc.outcome_uncertain
+                    retry = exc.retry_safe
+                except Exception as exc:      # noqa: BLE001
+                    transport_exc = type(exc).__name__
+                response_ts = time.monotonic()
+                bucket = classify(intent.expect, status, code, transport_exc)
+                local.append({
+                    "seq": intent.seq, "agent": token_label(intent.agent),
+                    "op": intent.op, "expect": intent.expect, "bucket": bucket,
+                    "status": status, "code": code,
+                    "outcome_uncertain": unc, "retry_safe": retry,
+                    "transport": transport_exc,
+                    "duration_ms": round((response_ts - t0) * 1000.0, 3),
+                })
+                limiter.release(response_ts)
+            with lock:
+                for rec in local:
+                    buckets[rec["bucket"]] += 1
+                records.extend(local)
+
+        shards = [intents[i::leases] for i in range(leases)]
+        threads = [threading.Thread(target=worker, args=(s,), name="d096-client-%d" % i)
+                   for i, s in enumerate(shards)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=budget)
+
+        closed = adapter.close(timeout=10.0)
+        elapsed = time.monotonic() - started
+        fd1, rss1 = _nfd(), _rss_kb()
+        threads_after = _adapter_threads()
+        workspace_bytes = _tree_bytes(base)
+
+        expected = {"valid_below_capacity_success": valid,
+                    "expected_readonly_denial": ro_save,
+                    "expected_saturation_busy": 0,
+                    "unexpected_unavailable": 0,
+                    "unexpected_other_error": 0}
+        ok, problems = verdict(buckets, expected)
+
+        resources = {
+            "workspace_bytes": workspace_bytes,
+            "workspace_limit_bytes": MAX_WORKSPACE_BYTES,
+            "fixture_bytes": fixture_bytes,
+            "fixture_limit_bytes": MAX_FIXTURE_BYTES,
+            "fd_before": fd0, "fd_after": fd1,
+            "fd_ok": (fd0 is None or fd1 is None or fd1 <= fd0 + FD_BASELINE_SLACK),
+            "adapter_threads_live": threads_live,
+            "adapter_threads_after_close": threads_after,
+            "adapter_threads_ok": (len(threads_live) == EXPECTED_ADAPTER_THREADS
+                                   and not threads_after),
+            "rss_before_kb": rss0, "rss_after_kb": rss1,
+            "rss_growth_bytes": (None if rss0 is None or rss1 is None
+                                 else (rss1 - rss0) * 1024),
+            "rss_ok": (rss0 is None or rss1 is None
+                       or (rss1 - rss0) * 1024 <= MAX_RSS_GROWTH_BYTES),
+            "closed": closed,
+            "max_leases_held": limiter.max_held,
+            "elapsed_seconds": round(elapsed, 3),
+            "within_budget": elapsed <= budget,
+        }
+        if not resources["closed"]:
+            ok, problems = False, problems + ["adapter.close() did not return True"]
+        for key in ("fd_ok", "adapter_threads_ok", "rss_ok", "within_budget"):
+            if not resources[key]:
+                ok, problems = False, problems + ["resource bound failed: " + key]
+        if resources["workspace_bytes"] > MAX_WORKSPACE_BYTES:
+            ok, problems = False, problems + ["workspace exceeds the frozen bound"]
+        if resources["max_leases_held"] > leases:
+            ok, problems = False, problems + ["client leases exceeded K"]
+
+        records.sort(key=lambda r: r["seq"])
+        return {
+            "harness": "d096-http-gate-harness",
+            "stage": stage,
+            "frozen": {"seed": FROZEN_SEED, "total": total, "valid": valid,
+                       "ro_save": ro_save, "leases": leases, "hold_seconds": hold,
+                       "budget_seconds": budget},
+            "schedule_fingerprint": schedule_fingerprint(intents),
+            "schedule_counts": counts,
+            "schedule_per_agent": per_agent,
+            "requested": len(records),
+            "buckets": buckets,
+            "expected": expected,
+            "result": "PASS" if ok else "FAIL",
+            "problems": problems,
+            "resources": resources,
+            "records": records,
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        residue = _tree_bytes(base)
+        shutil.rmtree(base, ignore_errors=True)
+        if residue and os.path.isdir(base):
+            sys.stderr.write("warning: temp residue at %s\n" % base)
+
+
+# --------------------------------------------------------------------------
+# Track B: deterministic 6+1 saturation
+# --------------------------------------------------------------------------
+def _raw_request(path, token, body, ctype=b"application/json"):
+    head = (b"POST " + path.encode("ascii") + b" HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Authorization: Bearer " + token.encode("ascii") + b"\r\n"
+            b"Content-Type: " + ctype + b"\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"Connection: close\r\n\r\n")
+    return head + body
+
+
+def _raw_exchange(port, payload, *, timeout=5.0, read_delay=0.0):
+    s = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+    try:
+        s.sendall(payload)
+        if read_delay:
+            time.sleep(read_delay)
+        s.settimeout(timeout)
+        chunks = []
+        while True:
+            try:
+                chunk = s.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        s.close()
+
+
+def _status_code(raw):
+    if not raw:
+        return None, None
+    try:
+        status = int(raw.split(b" ", 2)[1])
+    except (IndexError, ValueError):
+        return None, None
+    code = None
+    if b"\r\n\r\n" in raw:
+        try:
+            obj = json.loads(raw.split(b"\r\n\r\n", 1)[1].decode("utf-8"))
+            if isinstance(obj, dict) and obj.get("ok") is False \
+                    and isinstance(obj.get("error"), dict):
+                code = obj["error"].get("code")
+        except Exception:  # noqa: BLE001
+            pass
+    return status, code
+
+
+# --------------------------------------------------------------------------
+# Track B: deterministic 6+1 saturation (D097 correction)
+#
+# D096/D095 placed the excess probe inside a 50 ms drain window using a
+# threading.Barrier plus a read_delay and a 10 ms excess sleep.  That is a
+# timing race: if the excess connection is accepted before all six occupiers
+# hold a worker slot, the excess is admitted and an occupier is rejected busy
+# (the D095 "299 valid / 49 busy / 2 other" flake).  It is not deterministic.
+#
+# The D097 correction holds the six admitted operations at a REAL service-entry
+# barrier: the harness service blocks inside its list() handler until all six
+# workers have confirmed entry, the excess probe is sent only then (while all
+# six slots are provably held in-handler), and the six are released only after
+# the probe has been fully answered.  No socket-open / drain-window timing is
+# used anywhere on the saturation path.
+# --------------------------------------------------------------------------
+class _EntryGate:
+    """A per-cycle real service-entry barrier for exactly ``n`` workers."""
+
+    def __init__(self, n):
+        self._n = n
+        self._lock = threading.Lock()
+        self._count = 0
+        self.entered = threading.Event()      # set once all n have entered
+        self.release = threading.Event()      # main sets to let them proceed
+
+    @property
+    def count(self):
+        with self._lock:
+            return self._count
+
+    def enter(self):
+        with self._lock:
+            self._count += 1
+            if self._count >= self._n:
+                self.entered.set()
+        self.release.wait(timeout=30.0)
+
+
+def _make_gated_service(policies):
+    """LocalFileService subclass whose list() waits on the active entry gate."""
+    from drive_tool.file_service import LocalFileService
+
+    class _GatedService(LocalFileService):
+        _gate = None
+
+        def list(self, token, source_id, file_id="root", **kwargs):
+            gate = self._gate
+            if gate is not None:
+                gate.enter()
+            return super().list(token, source_id, file_id, **kwargs)
+
+    return _GatedService(policies)
+
+
+def run_saturation(repo, cycles=SAT_CYCLES, budget=STAGE_BUDGET_SECONDS):
+    """Deterministic overload with a REAL service-entry barrier.
+
+    Six admitted list operations are held inside the service handler until all
+    six workers have confirmed entry; only then is the excess probe sent.  With
+    every worker slot provably occupied in-handler, the excess must receive a
+    503 busy envelope, and no occupier can be rejected.
+    """
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+
+    base = tempfile.mkdtemp(prefix="d097-sat-")
+    started = time.monotonic()
+    try:
+        adapter = None
+        roots, _fixture = build_roots(base)
+        policies = build_policies(roots)
+        service = _make_gated_service(policies)
+        adapter = DriveHTTPAdapter(service=service, port=0, socket_timeout=5.0)
+        time.sleep(0.1)
+        fd0 = _nfd()
+        threads_live = _adapter_threads()
+        token = _TOKENS[0]
+        payload = json.dumps({"source_id": "main", "file_id": "root",
+                              "limit": 20, "offset": 0}).encode("ascii")
+        req = _raw_request("/v1/list", token, payload)
+
+        results = []
+        for cycle in range(cycles):
+            gate = _EntryGate(SAT_OCCUPIERS)
+            service._gate = gate
+            cycle_out = {}
+
+            def occupier(slot):
+                raw = _raw_exchange(adapter.port, req, timeout=15.0)
+                status, code = _status_code(raw)
+                cycle_out[("occupier", slot)] = (status, code)
+
+            threads = [threading.Thread(target=occupier, args=(i,))
+                       for i in range(SAT_OCCUPIERS)]
+            for t in threads:
+                t.start()
+
+            entered_ok = gate.entered.wait(timeout=20.0)
+            entered_count = gate.count
+
+            # All six worker slots are provably held inside the handler here.
+            exc_raw = _raw_exchange(adapter.port, req, timeout=15.0)
+            exc = _status_code(exc_raw)
+            cycle_out[("excess", 0)] = exc
+
+            # Release the six only after the excess probe is complete.
+            gate.release.set()
+            for t in threads:
+                t.join(timeout=20.0)
+
+            service._gate = None
+
+            occ = [cycle_out.get(("occupier", i), (None, None))
+                   for i in range(SAT_OCCUPIERS)]
+            results.append({"cycle": cycle, "entered_count": entered_count,
+                            "entered_ok": entered_ok,
+                            "occupiers": occ, "excess": exc})
+
+        closed = adapter.close(timeout=10.0)
+        elapsed = time.monotonic() - started
+        fd1 = _nfd()
+        threads_after = _adapter_threads()
+
+        occ_ok = sum(1 for r in results for (s, c) in r["occupiers"] if s == 200)
+        occ_bad = sum(1 for r in results for (s, c) in r["occupiers"]
+                      if not (s == 200))
+        exc_busy = sum(1 for r in results if r["excess"][1] == "busy")
+        exc_unavail = sum(1 for r in results if r["excess"][1] == "unavailable")
+        exc_other = len(results) - exc_busy - exc_unavail
+        entered_misses = sum(1 for r in results if not r["entered_ok"])
+
+        buckets = {
+            "valid_below_capacity_success": occ_ok,
+            "expected_readonly_denial": 0,
+            "expected_saturation_busy": exc_busy,
+            "unexpected_unavailable": exc_unavail,
+            "unexpected_other_error": occ_bad + exc_other,
+        }
+        expected = {"valid_below_capacity_success": SAT_OCCUPIERS * cycles,
+                    "expected_readonly_denial": 0,
+                    "expected_saturation_busy": SAT_EXCESS * cycles,
+                    "unexpected_unavailable": 0,
+                    "unexpected_other_error": 0}
+        ok, problems = verdict(buckets, expected)
+        if entered_misses:
+            ok, problems = False, problems + [
+                "service-entry barrier not reached in %d cycle(s)" % entered_misses]
+        if not closed:
+            ok, problems = False, problems + ["adapter.close() did not return True"]
+        if threads_after:
+            ok, problems = False, problems + ["adapter threads not reaped"]
+        if fd0 is not None and fd1 is not None and fd1 > fd0 + FD_BASELINE_SLACK:
+            ok, problems = False, problems + ["fd did not return to baseline"]
+
+        return {
+            "harness": "d097-http-gate-harness",
+            "stage": "saturation_6plus1",
+            "saturation_mode": "real-service-entry-barrier",
+            "frozen": {"cycles": cycles, "occupiers": SAT_OCCUPIERS,
+                       "excess": SAT_EXCESS, "budget_seconds": budget},
+            "requested": cycles * (SAT_OCCUPIERS + SAT_EXCESS),
+            "buckets": buckets,
+            "expected": expected,
+            "result": "PASS" if ok else "FAIL",
+            "problems": problems,
+            "resources": {"fd_before": fd0, "fd_after": fd1, "closed": closed,
+                          "adapter_threads_live": threads_live,
+                          "adapter_threads_after_close": threads_after,
+                          "elapsed_seconds": round(elapsed, 3),
+                          "within_budget": elapsed <= budget},
+            "cycles": results,
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# Adversarial protocol track: best effort, never a normal gate pass
+# --------------------------------------------------------------------------
+def run_adversarial(repo, budget=STAGE_BUDGET_SECONDS):
+    """Adversarial framing probes.  Reported separately; never a gate pass."""
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+
+    base = tempfile.mkdtemp(prefix="d096-adv-")
+    try:
+        adapter = None
+        roots, _fixture = build_roots(base)
+        policies = build_policies(roots)
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=1.0)
+        time.sleep(0.1)
+        token = _TOKENS[0]
+        body = json.dumps({"source_id": "main", "file_id": "root",
+                           "limit": 20, "offset": 0}).encode("ascii")
+        cases = {
+            "overlong_request_line": b"POST /" + b"a" * 8200 + b" HTTP/1.1\r\n",
+            "overlong_header_block":
+                b"POST /v1/list HTTP/1.1\r\nX-Pad: " + b"a" * 16384 + b"\r\n",
+            "bare_lf_header_block": b"POST /v1/list HTTP/1.1\nHost: 127.0.0.1\n\n",
+            "huge_digit_content_length":
+                _raw_request("/v1/list", token, b"").replace(
+                    b"Content-Length: 0", b"Content-Length: " + b"9" * 5000),
+            "duplicate_content_length": (
+                b"POST /v1/list HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                b"Authorization: Bearer " + token.encode("ascii") + b"\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                b"Connection: close\r\n\r\n" + body),
+            "non_digit_content_length":
+                _raw_request("/v1/list", token, body).replace(
+                    b"Content-Length: " + str(len(body)).encode("ascii"),
+                    b"Content-Length: +5"),
+            "buffered_trailing_bytes": _raw_request("/v1/list", token, body) + b"X",
+        }
+        observed = {}
+        for name, payload in sorted(cases.items()):
+            raw = _raw_exchange(adapter.port, payload, timeout=2.0)
+            status, code = _status_code(raw)
+            observed[name] = {"status": status, "code": code,
+                              "bytes": len(raw)}
+        adapter.close(timeout=5.0)
+        return {
+            "harness": "d096-http-gate-harness",
+            "stage": "adversarial_protocol",
+            "kind": "adversarial-best-effort",
+            "gate_pass": False,
+            "note": ("Adversarial framing probes are recorded for information "
+                     "only.  This track is NOT a normal gate pass and must never "
+                     "be reported as acceptance."),
+            "observed": observed,
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# Gating helper: selfcheck, then smoke, then soak + saturation if smoke passes
+#
+# D101 correction -- HARNESS-ONLY AGGREGATE EXIT/STATUS.
+#
+# D096/D097 ``--gate`` returned ``{"smoke": ..., "soak": ...}`` with no
+# top-level ``result`` key, so the exit mapping in ``main()`` read ``None``
+# and returned a NONZERO code even when every stage PASSed (the quirk the
+# D097 report records in section 8).  Nothing about the stages was wrong;
+# only the aggregate exit/status was.
+#
+# The corrected gate now:
+#   * orchestrates the four REQUIRED stages -- selfcheck, smoke600,
+#     soak10000 and saturation_6plus1;
+#   * returns an aggregate dict that CARRIES a top-level ``result`` key;
+#   * exits 0 iff EVERY required stage was executed AND its own result is
+#     PASS; any FAIL, missing, skipped, error or timeout stage makes the
+#     gate nonzero;
+#   * preserves the D096/D097 rule: NO soak (nor saturation) after a smoke
+#     failure -- both are recorded as skipped and the gate is nonzero.
+#
+# Only this helper and the exit mapping that reads its ``result`` changed.
+# The stage runners, the frozen schedules/intents, the D089 accounting
+# buckets, the budgets and the real service-entry saturation barrier are
+# byte-for-byte the D097 code.
+# --------------------------------------------------------------------------
+REQUIRED_STAGES = ("selfcheck", "smoke600", "soak10000", "saturation_6plus1")
+
+
+def _run_guarded(fn, *args, **kwargs):
+    """Run a stage, turning any exception/timeout into an explicit non-PASS.
+
+    A stage that raises must never be able to look like a pass, so a
+    TimeoutError becomes ``TIMEOUT`` and any other exception becomes
+    ``ERROR``; a non-dict return becomes ``ERROR``.  All three are non-PASS
+    and therefore fail the aggregate.
+    """
+    try:
+        res = fn(*args, **kwargs)
+    except TimeoutError:
+        return {"result": "TIMEOUT", "problems": ["stage timed out"]}
+    except BaseException as exc:      # noqa: BLE001
+        return {"result": "ERROR",
+                "problems": ["stage raised %s" % type(exc).__name__]}
+    if not isinstance(res, dict):
+        return {"result": "ERROR", "problems": ["stage returned non-dict"]}
+    return res
+
+
+def _aggregate_gate(stages):
+    """PASS iff every REQUIRED stage was executed and reports PASS.
+
+    A missing/skipped stage (``None``), or any result other than ``PASS``
+    (FAIL / ERROR / TIMEOUT / MISSING / anything), is a problem, so a false
+    pass is impossible by construction.
+    """
+    problems = []
+    for name in REQUIRED_STAGES:
+        res = stages.get(name)
+        if res is None:
+            problems.append("%s: not executed (skipped/missing)" % name)
+            continue
+        status = res.get("result")
+        if status != "PASS":
+            problems.append("%s: %s" % (name, "MISSING" if status is None else status))
+    return (not problems), problems
+
+
+def run_gate(repo, allow_diagnostic_soak=False):
+    """Run the four required stages and return an aggregate verdict.
+
+    ``allow_diagnostic_soak`` is accepted for CLI compatibility but is
+    intentionally inert: D101 forbids a soak after a smoke failure, so the
+    soak is always withheld when smoke does not pass.
+    """
+    stages = {name: None for name in REQUIRED_STAGES}
+
+    stages["selfcheck"] = _run_guarded(selfcheck)
+    if stages["selfcheck"].get("result") == "PASS":
+        stages["smoke600"] = _run_guarded(
+            run_stage, repo, SMOKE_TOTAL, SMOKE_VALID, SMOKE_RO_SAVE, "smoke600")
+
+    smoke = stages["smoke600"]
+    if smoke is not None and smoke.get("result") == "PASS":
+        stages["soak10000"] = _run_guarded(
+            run_stage, repo, SOAK_TOTAL, SOAK_VALID, SOAK_RO_SAVE, "soak10000")
+        stages["saturation_6plus1"] = _run_guarded(run_saturation, repo)
+    # else: smoke skipped or failed -> soak and saturation are withheld.
+
+    ok, problems = _aggregate_gate(stages)
+    note = None
+    if stages["soak10000"] is None:
+        note = "soak withheld: smoke did not pass (no soak after smoke fail)"
+
+    return {
+        "harness": "d101-http-gate-harness",
+        "stage": "gate",
+        "required_stages": list(REQUIRED_STAGES),
+        "executed": [n for n in REQUIRED_STAGES if stages[n] is not None],
+        "result": "PASS" if ok else "FAIL",
+        "problems": problems,
+        "note": note,
+        "selfcheck": stages["selfcheck"],
+        "smoke": stages["smoke600"],
+        "soak": stages["soak10000"],
+        "saturation": stages["saturation_6plus1"],
+    }
+
+
+# --------------------------------------------------------------------------
+# Self-check (schedule + accounting), no adapter required
+# --------------------------------------------------------------------------
+def selfcheck():
+    problems = []
+    smoke = frozen_schedule(SMOKE_TOTAL, SMOKE_VALID, SMOKE_RO_SAVE)
+    soak = frozen_schedule(SOAK_TOTAL, SOAK_VALID, SOAK_RO_SAVE)
+    for name, intents, total, valid, ro in (
+            ("smoke600", smoke, SMOKE_TOTAL, SMOKE_VALID, SMOKE_RO_SAVE),
+            ("soak10000", soak, SOAK_TOTAL, SOAK_VALID, SOAK_RO_SAVE)):
+        counts, per_agent = schedule_counts(intents)
+        if len(intents) != total:
+            problems.append("%s: %d intents != %d" % (name, len(intents), total))
+        if counts["ok"] != valid:
+            problems.append("%s: ok %d != %d" % (name, counts["ok"], valid))
+        if counts["denied"] != ro:
+            problems.append("%s: denied %d != %d" % (name, counts["denied"], ro))
+        if len(per_agent) != AGENT_COUNT:
+            problems.append("%s: %d personas != %d" % (name, len(per_agent), AGENT_COUNT))
+        for it in intents:
+            if it.agent == READ_ONLY_AGENT and it.op == "save" and it.expect != "denied":
+                problems.append("%s: RO save not marked denied" % name)
+            if it.expect == "ok" and it.op == "save" and it.agent == READ_ONLY_AGENT:
+                problems.append("%s: RO agent given an authorized save" % name)
+        again = frozen_schedule(total, valid, ro)
+        if schedule_fingerprint(again) != schedule_fingerprint(intents):
+            problems.append("%s: schedule is not replayable" % name)
+
+    # accounting truth table
+    table = [
+        ("ok", 200, None, None, "valid_below_capacity_success"),
+        ("ok", None, "busy", None, "unexpected_other_error"),
+        ("ok", None, "denied", None, "unexpected_other_error"),
+        ("ok", None, "unavailable", None, "unexpected_unavailable"),
+        ("ok", None, "timeout", None, "unexpected_other_error"),
+        ("denied", None, "denied", None, "expected_readonly_denial"),
+        ("denied", 200, None, None, "unexpected_other_error"),
+        ("denied", None, "busy", None, "unexpected_other_error"),
+        ("denied", None, "unavailable", None, "unexpected_unavailable"),
+        ("busy", None, "busy", None, "expected_saturation_busy"),
+        ("busy", None, "unavailable", None, "unexpected_unavailable"),
+        ("busy", 200, None, None, "unexpected_other_error"),
+        ("ok", None, "unavailable", "RemoteDisconnected", "unexpected_unavailable"),
+        ("ok", None, None, "OSError", "unexpected_other_error"),
+    ]
+    for expect, status, code, exc, want in table:
+        got = classify(expect, status, code, exc)
+        if got != want:
+            problems.append("classify(%r,%r,%r,%r) -> %s != %s"
+                            % (expect, status, code, exc, got, want))
+
+    # saturation arithmetic
+    if SAT_OCCUPIERS * SAT_CYCLES != 300:
+        problems.append("saturation success arithmetic != 300")
+    if SAT_EXCESS * SAT_CYCLES != 50:
+        problems.append("saturation busy arithmetic != 50")
+    if DRAIN_HOLD_SECONDS < 0.055:
+        problems.append("drain hold below the frozen 55 ms")
+
+    return {
+        "harness": "d096-http-gate-harness",
+        "stage": "selfcheck",
+        "result": "PASS" if not problems else "FAIL",
+        "problems": problems,
+        "schedule_fingerprints": {
+            "smoke600": schedule_fingerprint(smoke),
+            "soak10000": schedule_fingerprint(soak),
+        },
+        "schedule_counts": {
+            "smoke600": schedule_counts(smoke)[0],
+            "soak10000": schedule_counts(soak)[0],
+        },
+        "saturation_arithmetic": {"valid": SAT_OCCUPIERS * SAT_CYCLES,
+                                  "busy": SAT_EXCESS * SAT_CYCLES},
+        "frozen": {"seed": FROZEN_SEED, "leases": CLIENT_LEASES,
+                   "hold_seconds": DRAIN_HOLD_SECONDS},
+    }
+
+
+def run_bounded(repo, calls=60, budget=120):
+    """Bounded cleanup check: a small workload plus full resource accounting."""
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient
+
+    base = tempfile.mkdtemp(prefix="d096-bounded-")
+    try:
+        adapter = None
+        roots, fixture_bytes = build_roots(base)
+        policies = build_policies(roots)
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=5.0)
+        time.sleep(0.1)
+        fd0, rss0 = _nfd(), _rss_kb()
+        live = _adapter_threads()
+        token = _TOKENS[0]
+        ok = 0
+        for i in range(calls):
+            DriveClient(port=adapter.port, token=token, timeout=5.0).list(
+                "main", limit=20)
+            ok += 1
+        closed = adapter.close(timeout=10.0)
+        time.sleep(0.05)
+        fd1, rss1 = _nfd(), _rss_kb()
+        after = _adapter_threads()
+        residue = _tree_bytes(base)
+        problems = []
+        if not closed:
+            problems.append("close did not return True")
+        if after:
+            problems.append("adapter threads not reaped: %s" % after)
+        if len(live) != EXPECTED_ADAPTER_THREADS:
+            problems.append("live adapter threads %d != %d"
+                            % (len(live), EXPECTED_ADAPTER_THREADS))
+        if fd0 is not None and fd1 is not None and fd1 > fd0 + FD_BASELINE_SLACK:
+            problems.append("fd %s -> %s" % (fd0, fd1))
+        if rss0 is not None and rss1 is not None and (rss1 - rss0) * 1024 > MAX_RSS_GROWTH_BYTES:
+            problems.append("rss grew beyond the frozen bound")
+        return {
+            "harness": "d096-http-gate-harness",
+            "stage": "bounded_cleanup",
+            "calls": calls, "ok": ok,
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "resources": {"fd_before": fd0, "fd_after": fd1, "closed": closed,
+                          "adapter_threads_live": live,
+                          "adapter_threads_after_close": after,
+                          "rss_before_kb": rss0, "rss_after_kb": rss1,
+                          "fixture_bytes": fixture_bytes,
+                          "residue_bytes": residue},
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="D096 independent HTTP stress-gate harness")
+    ap.add_argument("--repo", help="path to the drive-tool checkout to exercise")
+    ap.add_argument("--stage", choices=("smoke", "soak", "saturation", "bounded",
+                                        "adversarial"))
+    ap.add_argument("--gate", action="store_true",
+                    help="run smoke, then soak only if smoke passes")
+    ap.add_argument("--allow-diagnostic-soak", action="store_true")
+    ap.add_argument("--selfcheck", action="store_true")
+    ap.add_argument("--dump-schedule", metavar="PATH",
+                    help="write the frozen schedules + fingerprints to PATH and exit")
+    ap.add_argument("--json", help="write the full result to this path")
+    ap.add_argument("--quiet", action="store_true", help="omit per-call records")
+    args = ap.parse_args(argv)
+
+    if args.dump_schedule:
+        smoke = frozen_schedule(SMOKE_TOTAL, SMOKE_VALID, SMOKE_RO_SAVE)
+        soak = frozen_schedule(SOAK_TOTAL, SOAK_VALID, SOAK_RO_SAVE)
+        dump = {
+            "harness": "d096-http-gate-harness",
+            "stage": "frozen_schedule",
+            "frozen": {"seed": FROZEN_SEED, "leases": CLIENT_LEASES,
+                       "hold_seconds": DRAIN_HOLD_SECONDS,
+                       "budget_seconds": STAGE_BUDGET_SECONDS},
+            "schedules": {},
+        }
+        for name, intents in (("smoke600", smoke), ("soak10000", soak)):
+            counts, per_agent = schedule_counts(intents)
+            dump["schedules"][name] = {
+                "fingerprint": schedule_fingerprint(intents),
+                "counts": counts,
+                "per_agent": per_agent,
+                "intents": [it.as_dict() for it in intents],
+            }
+        with open(args.dump_schedule, "w", encoding="utf-8") as fh:
+            json.dump(dump, fh, indent=2, sort_keys=True)
+        print("wrote", args.dump_schedule)
+        return 0
+    if args.selfcheck:
+        out = selfcheck()
+    elif args.gate:
+        if not args.repo:
+            ap.error("--repo is required")
+        out = run_gate(args.repo, args.allow_diagnostic_soak)
+    elif args.stage:
+        if not args.repo:
+            ap.error("--repo is required")
+        if args.stage == "smoke":
+            out = run_stage(args.repo, SMOKE_TOTAL, SMOKE_VALID, SMOKE_RO_SAVE, "smoke600")
+        elif args.stage == "soak":
+            out = run_stage(args.repo, SOAK_TOTAL, SOAK_VALID, SOAK_RO_SAVE, "soak10000")
+        elif args.stage == "saturation":
+            out = run_saturation(args.repo)
+        elif args.stage == "bounded":
+            out = run_bounded(args.repo)
+        else:
+            out = run_adversarial(args.repo)
+    else:
+        ap.error("choose --selfcheck, --gate or --stage")
+
+    if args.quiet and isinstance(out, dict):
+        out = dict(out)
+        if isinstance(out.get("records"), list):
+            out["records"] = "<%d records omitted>" % len(out["records"])
+        if isinstance(out.get("cycles"), list):
+            out["cycles"] = "<%d cycles omitted>" % len(out["cycles"])
+    text = json.dumps(out, indent=2, sort_keys=True, default=str)
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    print(text)
+    return 0 if out.get("result") == "PASS" or out.get("stage") == "adversarial_protocol" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+FILE README.md atdropc29e3a2
+# d104 target HTTP runner — core package
+
+Pinned, stdlib-only runner that reproduces the accepted D102 final HTTP
+candidate and gates acceptance on the full committed suite and the exact D101
+final HTTP gate. It is authored and sandbox-tested here; it does **not** run on
+the target from here and **no target result is fabricated**. The operator runs
+it on the disposable target instance.
+
+## Files (core — everything needed to run)
+
+| file | bytes | sha256 |
+| --- | --- | --- |
+| `run_target_http.py` | 32795 | `4eaf7f530bb25646e2c58e61d05eded952fdf53172f2db212c4e43945d72fdbf` |
+| `http_gate_d101.py` | 45668 | `3754ca19b4a72797ac16a1e32300ddf399e7117e2dec63def6693d2512db8d7b` |
+
+`http_gate_d101.py` is the exact D101 corrected gate harness (drop
+`15192ab6f818cae9d74e94a7833a74a3d0826914`,
+`drive-tool/module-006/d101-final-http-gate/scripts/http_gate_d101.py`,
+sha256 `3754ca19…`). Its sha256 is embedded in the runner and verified before
+execution.
+
+## Pins
+
+- candidate: `Dolesh-avkalan/drive-tool` @ `337e4c713829af76615472eb47b81244ff399528`
+  (branch `feature/module-006b-final-service-candidate`)
+- archive: `https://codeload.github.com/Dolesh-avkalan/drive-tool/tar.gz/337e4c713829af76615472eb47b81244ff399528`
+  (sha256 `191d6f2bd985be51f1b6092472beeec25b267a4c6e89de7817b4d6538c61c6c3`)
+- accepted order fix preserved: `tests/test_partial_scan_review_fixes.py`
+  blob `c01003e7015915db3dcac15a168ff7aae3d423db`
+- composite sourcehash (adapter‖test): `b8b44c4c056e1925957445cc9b532c53194920124a469df54e49053a7dcbb71c`
+
+## Exact operator command (target: Debian / CPython 3.13.5)
+
+    cd d104-target-http-runner-summary && \
+    timeout 1200 python3 run_target_http.py --json d104_summary.json
+
+`timeout 1200` is the hard 20-minute outer operator bound. The runner defaults
+to the interpreter it is launched with; add `--python python3.13` to pin it
+explicitly. A nonzero exit means acceptance failed — read `d104_summary.json`
+and the retained raw logs under the workspace.
+
+## Behaviour
+
+Order, failing closed at every preflight gate:
+
+1. environment/identity capture;
+2. acquire the pinned archive (download, or `--archive` a local tar.gz) and
+   extract it with path/size/count/link guards;
+3. re-hash **every** executable source/test/importable file against the
+   embedded pinned blob-sha1 + sha256, and reject unexpected importable/
+   executable files anywhere, any unexpected `drive_tool/` or `tests/` file,
+   symlinks, traversal and oversize;
+4. verify the gate payload sha256;
+5. run the committed suite (`python -m unittest discover -s tests -v`) and
+   audit skips — exactly the three documented control/opt-in skips are allowed;
+   any other (platform/adapter-missing) skip is a FAIL;
+6. only if the suite passes, run the D101 gate (`http_gate_d101.py --repo <src>
+   --gate --json <ws>/gate.json`) and require raw exit 0 with selfcheck +
+   smoke600 + soak10000 + saturation_6plus1 all PASS and buckets
+   580+20 / 9680+320 / 300+50, zero unexpected/unavailable;
+7. gate workspace size and write a symlink-safe manifest; retain all evidence.
+
+Acceptance stages stop on the first failure; the overall exit is strictly
+nonzero on any FAIL/missing/skip/error/timeout. Execution is confined to a new
+unique `/tmp` workspace (0700, descendant of the base, never the base itself);
+`TMPDIR` lives inside it and bytecode writing is disabled. No cleanup.
+
+Safety: stdlib only; no credential, cloud API, install, reboot, service/public
+binding, real root or deploy; no generic remote shell and no unrelated
+framework.
