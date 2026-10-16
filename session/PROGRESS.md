@@ -425,3 +425,5 @@ Progresscheck collectedD081 actualpatchedHTTPexecution: fixedconfirmedframing/pr
 2026-10-16 04:06UTC: cloud Sarvam recovery failed on missing chat; moved exact harsh-test brief inline to fresh local Sarvam D112. No duplicate implementation; target baseline pass retained.
 
 2026-10-16: final harsh package Gemini ACCEPT; launched exact hash-verified package on disposable target (D118), results pending.
+
+2026-10-16 04:47UTC: harsh target found concurrency failure and memory coverage gap. Delegated precise diagnosis to Sarvam; original evidence/pins retained. Normal D109 cloud gate remains PASS.
