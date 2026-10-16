@@ -383,3 +383,5 @@ User status livecheck: identifiedGeminiD075 failed ratherthanrunning; collectedD
 Progresscheck collectedD081 actualpatchedHTTPexecution: fixedconfirmedframing/priority/repeatclose,4passingnewtests,10knownfailuresremain. Queued focusedGeminiD084delta; authdecisionD083pending. No acceptance/soakclaim.
 
 00:16UTC collectedD083/D082; settledcapabilitycontract without privateAPI/newrestrictions, dispatchedlocalD085correcttests/actualgatedHTTPstress. Runnerpatchhadone-tokenimportbug and2messageassertions; queuedshortSarvamD086 exactcorrection+18negativegates. No productionrewrite or acceptanceclaim.
+
+00:26UTC collectedD084ACCEPTsecuritydelta with explicitactivesocketownership. Retaineddirectorstricterlockbudgetgate, delegatednarrowD087timedlockfix; localD085 andcloudD086 continue withoutduplicateproductionwork.
