@@ -1,0 +1,132 @@
+D092 Gemini focuseddesign decision, noimplementation. D088 source7dab4357/8cd137f7 proves unexpectedunavailable is busyrejecttransportRemoteDisconnected: in onerunserver_busy_reject39 == clientbusy37+unavailable2; zeroserverunavailableenvelopes, malformedfallback0. Realissue inline _busy_reject reads once under ENTIRE50msdeadline; raworlarge/stalled input canconsume responsewritebudget, existingbest-effort limits alreadyaccepted. For wellformed small actualDriveClient requests need reliable deterministic6+1busytest, no blanketunavailableallowance. Decide minimal busy phasebudget fix within50ms/16KiB/noqueue/noextra threads: reserve responsewrite slice, boundedread/drain; neverauthenticateorinvokeFSinaccept. Differentiate adverseoversized/stalledrequestbest-effort caveat from normal smallrequests, no impossibleOSscheduler/TCPguarantee. Use actualD088evidence, D089orthogonalbelowcapacity/saturationcriteria. Return exactcorrectioncontract+reprotests forDeepSeek ifneeded, no rewrite/deployment. D08955mshold is schedulebudget only, not mathematicalserveroccupancyguarantee under arbitraryscheduler; avoidsuchclaims. All6agentpersonas, unexpectedunavailablezeroonvalidbelowcapacityandnormalbarriersaturation, no retries. StaticTESTS_NOT_RUN.
+BUSY SOURCE
+>     def _busy_reject(self, conn):
+          busy_deadline = time.monotonic() + BUSY_REJECT_BUDGET_SECONDS
+          total_read = 0
+  
+          remaining = busy_deadline - time.monotonic()
+          if remaining > 0:
+              try:
+                  conn.settimeout(remaining)
+                  chunk = conn.recv(MAX_BUSY_READ_BYTES)
+                  if chunk:
+                      total_read += len(chunk)
+              except (socket.timeout, OSError, ValueError):
+                  pass
+  
+          body = (
+              b'{"ok":false,"error":{"code":"busy",'
+              b'"outcome_uncertain":false,"retry_safe":true}}'
+          )
+          response = (
+              b"HTTP/1.1 503 Service Unavailable\r\n"
+              b"Content-Type: application/json\r\n"
+              b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+              b"Connection: close\r\n"
+              b"\r\n"
+              + body
+          )
+          self._send_with_deadline(conn, response, busy_deadline)
+  
+          try:
+              conn.shutdown(socket.SHUT_WR)
+          except OSError:
+              pass
+  
+          while total_read < MAX_BUSY_READ_BYTES:
+              remaining = busy_deadline - time.monotonic()
+              if remaining <= 0:
+                  break
+              try:
+                  conn.settimeout(remaining)
+                  chunk = conn.recv(MAX_BUSY_READ_BYTES - total_read)
+              except (socket.timeout, OSError, ValueError):
+                  break
+              if not chunk:
+                  break
+              total_read += len(chunk)
+  
+          try:
+              conn.close()
+          except OSError:
+              pass
+  
+      # ----- bounded IO helpers --------------------------------------------
+  
+      def _send_with_deadline(self, conn, data, deadline):
+          view = memoryview(data)
+          while len(view) > 0:
+              remaining = deadline - time.monotonic()
+              if remaining <= 0:
+                  return False
+              try:
+                  conn.settimeout(remaining)
+              except (OSError, ValueError):
+                  return False
+>     def _safe_write(self, conn, data):
+          deadline = time.monotonic() + self._socket_timeout
+          self._send_with_deadline(conn, data, deadline)
+  
+>     def _safe_send_error(
+          self, conn, status, code, outcome_uncertain, retry_safe
+      ):
+          try:
+              body = json.dumps(
+                  {
+                      "ok": False,
+                      "error": {
+                          "code": code,
+                          "outcome_uncertain": bool(outcome_uncertain),
+                          "retry_safe": bool(retry_safe),
+                      },
+                  },
+                  separators=(",", ":"),
+              ).encode("utf-8")
+          except BaseException:
+              body = (
+                  b'{"ok":false,"error":{"code":"unavailable",'
+                  b'"outcome_uncertain":false,"retry_safe":true}}'
+              )
+              status = 503
+  
+          status_text = _STATUS_TEXT.get(status, "Error")
+          head = (
+              ("HTTP/1.1 %d %s\r\n" % (status, status_text)).encode("ascii")
+              + b"Content-Type: application/json\r\n"
+              + b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+              + b"Connection: close\r\n"
+              + b"\r\n"
+          )
+          self._safe_write(conn, head + body)
+  
+      def _finalize_connection(self, conn):
+          drain_deadline = time.monotonic() + POST_RESPONSE_DRAIN_SECONDS
+          try:
+              conn.shutdown(socket.SHUT_WR)
+          except OSError:
+              pass
+          total_drained = 0
+          while total_drained < MAX_DRAIN_BYTES:
+              remaining = drain_deadline - time.monotonic()
+              if remaining <= 0:
+                  break
+              try:
+                  conn.settimeout(remaining)
+              except (OSError, ValueError):
+                  break
+              try:
+                  chunk = conn.recv(_RECV_CHUNK)
+              except (socket.timeout, OSError, ValueError):
+                  break
+              if not chunk:
+                  break
+              total_drained += len(chunk)
+          try:
+              conn.close()
+          except OSError:
+              pass
+  
+      # ----- request reading -----------------------------------------------
+  
+      def _read_request(self, conn):
+          deadline = time.monotonic() + self._socket_timeout
