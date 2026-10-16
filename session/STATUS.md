@@ -1,4 +1,18 @@
-# Drive Tool current status — 2026-10-15 18:00 UTC heartbeat
+# Drive Tool current status — 2026-10-16 13:40 UTC
+
+**Summary (2026-10-16 13:40 UTC):**
+1. Local drive service USABLE: deployed on the browser host (directortemp) as `bh-drive`, 127.0.0.1:8940, data /var/lib/agent-drive/projects.
+2. Launcher drive_tool/serve.py merged to main (PR #11, 6391049); 603 tests OK as non-root.
+3. Release gate passed earlier on 321ccae (drop drive-tool/release/dt03-release-gate/).
+4. browser-tool PRs #40 and #41 wire it in; box at 0a23a00, 14 services active.
+5. Relay tasks use `read:/attach:/save_to: drive:<project>/<path>`; each drive save appends to `<project>/history/YYYY-MM.md`.
+6. Live check dv01-dv03 (browser-bus, 13:31-13:35 UTC): save, read and the history log all worked.
+7. Evidence and caveats: browser-tool docs/STATUS.md, section "Shared agent drive".
+8. D122 (harsh-test loop) DEFERRED by owner directive 2026-10-16.
+9. Next: Google Drive backup = rclone sync, needs Dolesh's Google sign-in (design note drop drive-tool/release/dt01-rclone-design.md).
+10. The rest of this file is the 2026-10-15 heartbeat, kept as history; its URGENT PC-shutdown note is from 06:10 UTC 2026-10-16 (the PC appeared off at 06:06 UTC, commit b33b6b6).
+
+## 2026-10-15 18:00 UTC heartbeat (historical)
 
 **URGENT 06:10 UTC — DOLESH: SHUT DOWN THE HOME PC NOW.** Stop D122 and any running relay/heartbeat work at once (do not start anything new), push whatever evidence is already on disk if it takes under 5 minutes, post the final notification, stop the local browser host cleanly, then do a normal Windows shutdown. PC only, never the cloud boxes.
 
