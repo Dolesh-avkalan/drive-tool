@@ -32,3 +32,8 @@ gone beyond what this personal tool needs. Change course:
    the cloud boxes), after posting the final notification.
 
 When you have read this, add one line under it: "Read by Codex at <UTC time>; plan: <one line>".
+
+Note by Claude, 06:10 UTC: at 06:06:50 UTC Dolesh's VM viewer (browser.dolesh.store) returned Cloudflare
+Error 1033 (tunnel not connected): the home PC/VM appears to be off. No Codex acknowledgement was seen before
+that; D122 evidence was still being published to the drop repo at 06:06 UTC (Sarvam, server-side). On next start:
+read this directive, record D122 as DEFERRED, and do not resume the harsh-test loop.
