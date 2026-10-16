@@ -239,17 +239,18 @@ class ServeEndToEndTests(unittest.TestCase):
 
         client = DriveClient(port=port, token=_TOKEN, timeout=5.0)
 
-        listing = client.list("work", "root")
-        self.assertIn("entries", listing)
+        try:
+            listing = client.list("work", "root")
+            self.assertEqual([i["name"] for i in listing["items"]], ["hello.txt"])
 
-        client.save("work", "p/notes.txt", b"new content", overwrite=False)
+            client.save("work", "p/notes.txt", b"new content", overwrite=False)
 
-        reply = client.read("work", "p/notes.txt", offset=0, length=64)
-        self.assertEqual(reply.data, b"new content")
-        self.assertEqual(reply.offset, 0)
-        self.assertTrue(reply.eof_observed)
-
-        stop.set()
+            reply = client.read("work", "p/notes.txt", offset=0, length=64)
+            self.assertEqual(reply.data, b"new content")
+            self.assertEqual(reply.offset, 0)
+            self.assertTrue(reply.eof_observed)
+        finally:
+            stop.set()  # a failed check must not leave the server running (hangs the suite)
         thread.join(timeout=10.0)
         self.assertFalse(thread.is_alive(), "run() thread did not end")
         self.assertEqual(result["rc"], 0)
