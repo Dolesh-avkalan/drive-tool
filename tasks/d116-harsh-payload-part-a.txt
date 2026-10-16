@@ -1,0 +1,944 @@
+D116 recovery: cloud D114 payload delivery timed out before confirmed send. Review same exact payload in TWO CHUNKS, not a new implementation. This is part A lines1-943, helpers+hostileHTTP+admission+isolation+concurrency. Part B crash/resource/faults/main follows separately after your reply. Do not give whole-package approval until B. You already accepted outer runner in D113 (chat may not contain it here): f55f1ca20d79f576b32006e7a9745fd9baa4b2af8cf55e6b77cf62e541712c87. Full payload SHA5599d32fa9df7918a8809098492284cebbce42b9141c61844c18c069fc17db43 at drop e96136c9. Immutable source337e4c7. Static security only TESTS_NOT_RUN; return partA blockers or PART_A_CLEAR_PENDING_B. No code/rewrite/tests. Verify child/host/path/loopback/time bounds and credible test oracle. Full original review requirements first line retained below.
+D114 Gemini static part2 PAYLOAD SECURITY review. Continue D113 accepted outerrunner-only; now review actual harsh_checks_d110.py below, SHA2565599d32fa9df7918a8809098492284cebbce42b9141c61844c18c069fc17db43,75545B at drop e96136c9ce73a50f0988c22f636f0a5738204ed6. Immutable source337e4c7. No tests run by reviewer. Verify real host bounds child-only CPU/RAM/FD pressure, processgroups/kill ownership/reaping, absolute deadlines, fixture-only paths/symlink escape prevention, disk floors and limits, conservative uncertainty/no uncertainwrite retries. Host disposable instance-20261015-210506 only. No mounts/sudo/cloudAPI/credential/privatepath/public listener/service changes; parent/SSH protected. Inspect every stage and CLI, fault injection scope/restoration, deterministic barriers; expected denial/busy cannot hide corruption/escape/deadlock/unhandled failures. Sandbox RAM skipped=>PARTIAL not PASS, no fake full coverage. Static ACCEPT_PACKAGE with exact outer f55f1ca20d79f576b32006e7a9745fd9baa4b2af8cf55e6b77cf62e541712c87 +payload hashes only if safe; else concrete CHANGES REQUIRED. A second independently authored package exists; outside this review, do not mix files. Return concise blockers/limitations. No implementation rewrite.
+#!/usr/bin/env python3
+"""d110 harsh-fault payload (stdlib only).
+
+This is the PINNED payload executed by ``run_harsh_d110.py``.  Its sha256 is
+embedded in the runner and verified BEFORE execution.  It is a separate,
+bounded harsh-fault extension to the accepted D102 final HTTP candidate
+(Dolesh-avkalan/drive-tool @ 337e4c713829af76615472eb47b81244ff399528); it
+does NOT modify any product source, test, acceptance spec or old evidence.
+
+It is adapted from the approved D065/Gemini harsh design, but every gate is
+expressed against the ACTUAL accepted HTTP adapter / LocalFileService
+behaviour -- the historical design's guesses are not reimplemented.  Where the
+actual behaviour differs from the historical expectation, the ACTUAL result is
+recorded and the divergence is reported (never relabelled a pass).
+
+Fixed allow-list of stages (execution order):
+
+  1. selfcheck            -- frozen arithmetic + accounting, no adapter.
+  2. http_hostile         -- malformed/oversize/slow-partial HTTP framing.
+  3. admission_exhaustion -- deterministic 6+1 admission + recovery.
+  4. isolation            -- cross-agent / path / symlink containment.
+  5. concurrent_ops       -- simultaneous create/overwrite/range ops.
+  6. crash_kill           -- synchronized child SIGKILL + fresh recovery +
+                             truthful orphan-temp audit.
+  7. resource_pressure    -- CHILD-only CPU / RAM / FD pressure.
+  8. enospc               -- RLIMIT_FSIZE EFBIG + injected 4-phase ENOSPC.
+
+Every stage prints exactly one ``HARSH_JSON: {...}`` summary line and, with
+``--json``, writes the same object to a file.  Exit is 0 only on PASS; SKIPPED
+exits 2; FAIL/ERROR exits 1.  A SKIPPED capability is NEVER reported as a pass.
+
+Safety: stdlib only; no credential, no cloud API, no install, no reboot, no
+service/public binding, no real root, no deploy.  All work is confined to a
+caller-supplied bounded workspace; the payload never touches anything outside
+it.  Only the payload's own child process groups are ever killed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import errno
+import hashlib
+import json
+import os
+import resource
+import secrets
+import signal
+import socket
+import sys
+import tempfile
+import threading
+import time
+
+# ---------------------------------------------------------------------------
+# Frozen constants
+# ---------------------------------------------------------------------------
+FROZEN_SEED = 0x0D110
+AGENT_COUNT = 6
+
+TEMP_PREFIX = ".drive-tool-tmp-"
+TEMP_SCAN_LIMIT = 100000
+
+MAX_FIXTURE_BYTES = 32 * 1024 * 1024
+MAX_WORKSPACE_BYTES = 192 * 1024 * 1024     # <= 192 MiB retained workspace
+MIN_FREE_BYTES = 1024 * 1024 * 1024         # >= 1 GiB free disk floor
+FD_BASELINE_SLACK = 2
+MAX_CONCURRENT = 6
+HOST_MEM_FLOOR_KB = 1024 * 1024            # >= 1 GiB MemAvailable before RAM
+HOST_MEM_ABORT_KB = 512 * 1024             # abort RAM pressure below 512 MiB
+CHILD_RLIMIT_AS = 512 * 1024 * 1024        # child RLIMIT_AS <= 512 MiB
+CHILD_RLIMIT_FSIZE = 8192
+
+# Agent personas: (label, root_name, alias, operations, read_cap, write_cap)
+PERSONAS = (
+    ("agent-main", "main", "main", ("find", "list", "read", "save"), None, None),
+    ("agent-other", "other", "other", ("find", "list", "read", "save"), None, None),
+    ("agent-small", "small", "small", ("find", "list", "read", "save"), 1024, 1024),
+    ("agent-ro", "ro", "ro", ("find", "list", "read"), None, None),
+    ("agent-alias-a", "alias_a", "shared", ("find", "list", "read", "save"), None, None),
+    ("agent-alias-b", "alias_b", "shared", ("find", "list", "read", "save"), None, None),
+)
+READ_ONLY_AGENT = 3
+
+# Synthetic, non-secret tokens (>= 32 bytes required by the client).
+TOKENS = (
+    "d110-main-" + "A" * 40,
+    "d110-other-" + "B" * 40,
+    "d110-small-" + "C" * 40,
+    "d110-ro-" + "D" * 40,
+    "d110-alias-a-" + "E" * 40,
+    "d110-alias-b-" + "F" * 40,
+)
+
+STAGE_NAMES = ("selfcheck", "http_hostile", "admission_exhaustion", "isolation",
+               "concurrent_ops", "crash_kill", "resource_pressure", "enospc")
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _nfd():
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except OSError:
+        return None
+
+
+def _rss_kb():
+    try:
+        with open("/proc/self/status", "r") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except OSError:
+        return None
+    return None
+
+
+def _mem_available_kb():
+    try:
+        with open("/proc/meminfo", "r") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1])
+    except OSError:
+        return None
+    return None
+
+
+def _tree_bytes(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def _scan_temp(root):
+    """Return every regular file whose name begins with the reserved prefix."""
+    found = []
+    n = 0
+    for dp, _dn, fn in os.walk(root):
+        for name in fn:
+            n += 1
+            if n > TEMP_SCAN_LIMIT:
+                return found
+            if name.startswith(TEMP_PREFIX):
+                found.append(os.path.relpath(os.path.join(dp, name), root))
+    return sorted(found)
+
+
+def _adapter_threads():
+    return sorted(t.name for t in threading.enumerate()
+                  if t.name.startswith("drive-http"))
+
+
+# ---------------------------------------------------------------------------
+# Synthetic roots + policies (bounded)
+# ---------------------------------------------------------------------------
+def build_roots(base):
+    total = 0
+    roots = {}
+    for _label, root_name, _alias, _ops, _rc, _wc in PERSONAS:
+        root = os.path.join(base, "root_" + root_name)
+        os.makedirs(os.path.join(root, "sub"), exist_ok=True)
+        os.makedirs(os.path.join(root, "savepool"), exist_ok=True)
+        total += _w(os.path.join(root, "readme.txt"), b"d110 fixture readme\n" * 4)
+        total += _w(os.path.join(root, "data.bin"), bytes(range(256)) * 16)
+        total += _w(os.path.join(root, "empty.bin"), b"")
+        total += _w(os.path.join(root, "sub", "note.txt"), b"nested note\n")
+        roots[root_name] = os.path.realpath(root)
+    if total > MAX_FIXTURE_BYTES:
+        raise RuntimeError("fixtures exceed the frozen bound")
+    return roots, total
+
+
+def _w(path, data):
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return len(data)
+
+
+def build_policies(roots):
+    from drive_tool.service_policy import AgentPolicy, SourceGrant
+    policies = []
+    for idx, (label, root_name, alias, ops, rc, wc) in enumerate(PERSONAS):
+        grant = SourceGrant(
+            alias=alias,
+            root=roots[root_name],
+            operations=frozenset(ops),
+            max_read_bytes=rc if rc is not None else 1048576,
+            max_write_bytes=wc if wc is not None else 1048576,
+        )
+        policies.append(AgentPolicy(
+            agent_id=label,
+            token_sha256=hashlib.sha256(TOKENS[idx].encode("ascii")).digest(),
+            grants=(grant,),
+        ))
+    return tuple(policies)
+
+
+# ---------------------------------------------------------------------------
+# Raw HTTP helpers
+# ---------------------------------------------------------------------------
+def _raw_request(path, token, body, ctype=b"application/json"):
+    head = (b"POST " + path.encode("ascii") + b" HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Authorization: Bearer " + token.encode("ascii") + b"\r\n"
+            b"Content-Type: " + ctype + b"\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"Connection: close\r\n\r\n")
+    return head + body
+
+
+def _raw_exchange(port, payload, *, timeout=5.0, read_delay=0.0, half_close=False):
+    """Send raw bytes, return (response_bytes, error_name_or_None, elapsed)."""
+    t0 = time.monotonic()
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+    except OSError as exc:
+        return b"", type(exc).__name__, time.monotonic() - t0
+    try:
+        if payload:
+            s.sendall(payload)
+        if half_close:
+            try:
+                s.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+        if read_delay:
+            time.sleep(read_delay)
+        s.settimeout(timeout)
+        chunks = []
+        while True:
+            try:
+                chunk = s.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if sum(len(c) for c in chunks) > 4 * 1024 * 1024:
+                break
+        return b"".join(chunks), None, time.monotonic() - t0
+    except OSError as exc:
+        return b"", type(exc).__name__, time.monotonic() - t0
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+
+
+def _parse_resp(raw):
+    out = {"status": None, "code": None, "outcome_uncertain": None,
+           "retry_safe": None, "bytes": len(raw)}
+    if not raw:
+        return out
+    try:
+        out["status"] = int(raw.split(b" ", 2)[1])
+    except (IndexError, ValueError):
+        pass
+    if b"\r\n\r\n" in raw:
+        try:
+            obj = json.loads(raw.split(b"\r\n\r\n", 1)[1].decode("utf-8"))
+            if isinstance(obj, dict) and obj.get("ok") is False \
+                    and isinstance(obj.get("error"), dict):
+                out["code"] = obj["error"].get("code")
+                out["outcome_uncertain"] = obj["error"].get("outcome_uncertain")
+                out["retry_safe"] = obj["error"].get("retry_safe")
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def _map_exc(exc):
+    """Normalise a DriveClientError / ServiceError to (code, unc, retry, kind)."""
+    code = getattr(exc, "code", None)
+    unc = getattr(exc, "outcome_uncertain", None)
+    retry = getattr(exc, "retry_safe", None)
+    return {"code": code, "outcome_uncertain": unc, "retry_safe": retry,
+            "kind": type(exc).__name__}
+
+
+# ---------------------------------------------------------------------------
+# Service-entry barrier (deterministic admission exhaustion)
+# ---------------------------------------------------------------------------
+class _EntryGate:
+    def __init__(self, n):
+        self._n = n
+        self._lock = threading.Lock()
+        self._count = 0
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    @property
+    def count(self):
+        with self._lock:
+            return self._count
+
+    def enter(self):
+        with self._lock:
+            self._count += 1
+            if self._count >= self._n:
+                self.entered.set()
+        self.release.wait(timeout=30.0)
+
+
+def _make_gated_service(policies):
+    from drive_tool.file_service import LocalFileService
+
+    class _GatedService(LocalFileService):
+        _gate = None
+
+        def list(self, token, source_id, file_id="root", **kwargs):
+            gate = self._gate
+            if gate is not None:
+                gate.enter()
+            return super().list(token, source_id, file_id, **kwargs)
+
+    return _GatedService(policies)
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: selfcheck
+# ---------------------------------------------------------------------------
+def stage_selfcheck(repo, budget):
+    problems = []
+    # frozen arithmetic
+    if MAX_CONCURRENT != 6:
+        problems.append("MAX_CONCURRENT != 6")
+    if AGENT_COUNT != len(PERSONAS):
+        problems.append("persona count mismatch")
+    if len(set(TOKENS)) != AGENT_COUNT:
+        problems.append("tokens are not distinct")
+    if any(len(t) < 32 or len(t) > 256 for t in TOKENS):
+        problems.append("a token is outside the 32..256 length contract")
+    if TEMP_PREFIX != ".drive-tool-tmp-":
+        problems.append("TEMP_PREFIX drifted from the accepted value")
+    # scan-temp truth
+    with tempfile.TemporaryDirectory(prefix="d110-sc-") as d:
+        open(os.path.join(d, TEMP_PREFIX + "abc"), "wb").write(b"x")
+        open(os.path.join(d, "keep.bin"), "wb").write(b"y")
+        os.makedirs(os.path.join(d, "sub"), exist_ok=True)
+        open(os.path.join(d, "sub", TEMP_PREFIX + "def"), "wb").write(b"z")
+        found = _scan_temp(d)
+        if len(found) != 2:
+            problems.append("temp scan found %d, expected 2" % len(found))
+    # meminfo readability
+    if _mem_available_kb() is None:
+        problems.append("cannot read /proc/meminfo MemAvailable")
+    # fixture build bound
+    with tempfile.TemporaryDirectory(prefix="d110-sc2-") as d:
+        _roots, total = build_roots(d)
+        if total > MAX_FIXTURE_BYTES:
+            problems.append("fixture build exceeds bound")
+    return {
+        "stage": "selfcheck",
+        "result": "PASS" if not problems else "FAIL",
+        "problems": problems,
+        "frozen": {"seed": FROZEN_SEED, "agents": AGENT_COUNT,
+                   "max_concurrent": MAX_CONCURRENT, "temp_prefix": TEMP_PREFIX},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: http_hostile
+# ---------------------------------------------------------------------------
+def _hostile_cases(token):
+    body = json.dumps({"source_id": "main", "file_id": "root",
+                       "limit": 20, "offset": 0}).encode("ascii")
+    good = _raw_request("/v1/list", token, body)
+    cases = {
+        "overlong_request_line": b"POST /" + b"a" * 8200 + b" HTTP/1.1\r\n",
+        "overlong_header_block":
+            b"POST /v1/list HTTP/1.1\r\nX-Pad: " + b"a" * 16384 + b"\r\n",
+        "too_many_headers": (b"POST /v1/list HTTP/1.1\r\n"
+                             + b"".join(b"X-%d: v\r\n" % i for i in range(80))
+                             + b"Connection: close\r\n\r\n"),
+        "huge_digit_content_length": good.replace(
+            b"Content-Length: " + str(len(body)).encode("ascii"),
+            b"Content-Length: " + b"9" * 5000),
+        "duplicate_content_length": (
+            b"POST /v1/list HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Authorization: Bearer " + token.encode("ascii") + b"\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+            b"Connection: close\r\n\r\n" + body),
+        "non_digit_content_length": good.replace(
+            b"Content-Length: " + str(len(body)).encode("ascii"),
+            b"Content-Length: +5"),
+        "bare_lf_header_block": b"POST /v1/list HTTP/1.1\nHost: 127.0.0.1\n\n",
+        "buffered_trailing_bytes": good + b"X",
+        "unknown_endpoint": _raw_request("/v1/evil", token, body),
+        "oversize_json_body": _raw_request(
+            "/v1/list", token, b"x" * (65536 + 1024)),
+        "oversize_save_body": _raw_request(
+            "/v1/save?source_id=main&file_id=p/savepool/big.bin"
+            "&overwrite=true&create_parents=true",
+            token, b"z" * (1048576 + 1024), ctype=b"application/octet-stream"),
+        "truncated_body": (
+            b"POST /v1/list HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Authorization: Bearer " + token.encode("ascii") + b"\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: 4096\r\nConnection: close\r\n\r\n" + b"{}"),
+        "empty_request": b"",
+        "immediate_close": b"\r\n",
+    }
+    return cases
+
+
+def stage_http_hostile(repo, budget):
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient
+
+    base = tempfile.mkdtemp(prefix="d110-hostile-")
+    adapter = None
+    problems = []
+    try:
+        roots, _fx = build_roots(base)
+        policies = build_policies(roots)
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=1.0)
+        time.sleep(0.1)
+        fd0 = _nfd()
+        token = TOKENS[0]
+        observed = {}
+        max_bytes = 0
+        for name, payload in sorted(_hostile_cases(token).items()):
+            raw, err, elapsed = _raw_exchange(adapter.port, payload, timeout=3.0)
+            info = _parse_resp(raw)
+            info["transport_error"] = err
+            info["elapsed_ms"] = round(elapsed * 1000.0, 3)
+            observed[name] = info
+            max_bytes = max(max_bytes, info["bytes"])
+            # a hostile probe must never hang far beyond the socket timeout
+            if elapsed > 8.0:
+                problems.append("%s took %.1fs (server did not bound it)" % (name, elapsed))
+        # slow partial header (slowloris-lite): send half a header then stall
+        slow_raw, slow_err, slow_el = _raw_exchange(
+            adapter.port, b"POST /v1/list HTTP/1.1\r\nHost: 127.0.0.1\r\n",
+            timeout=3.0, read_delay=0.3)
+        observed["slow_partial_header"] = _parse_resp(slow_raw)
+        observed["slow_partial_header"]["transport_error"] = slow_err
+        observed["slow_partial_header"]["elapsed_ms"] = round(slow_el * 1000.0, 3)
+        # recovery: a valid request must still succeed after all the abuse
+        recovered = False
+        recovery_err = None
+        try:
+            DriveClient(port=adapter.port, token=token, timeout=5.0).list("main", limit=20)
+            recovered = True
+        except Exception as exc:  # noqa: BLE001
+            recovery_err = _map_exc(exc)
+        if not recovered:
+            problems.append("server did not recover after hostile probes: %s" % recovery_err)
+        if max_bytes > 1024 * 1024:
+            problems.append("a hostile probe returned %d bytes (unbounded)" % max_bytes)
+        closed = adapter.close(timeout=10.0)
+        threads_after = _adapter_threads()
+        fd1 = _nfd()
+        if not closed:
+            problems.append("adapter.close() did not return True")
+        if threads_after:
+            problems.append("adapter threads not reaped: %s" % threads_after)
+        if fd0 is not None and fd1 is not None and fd1 > fd0 + FD_BASELINE_SLACK:
+            problems.append("fd %s -> %s (leak)" % (fd0, fd1))
+        return {
+            "stage": "http_hostile",
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "observed": observed,
+            "recovery_ok": recovered,
+            "max_response_bytes": max_bytes,
+            "resources": {"fd_before": fd0, "fd_after": fd1, "closed": closed,
+                          "threads_after_close": threads_after},
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: admission_exhaustion (deterministic 6+1 + recovery)
+# ---------------------------------------------------------------------------
+def stage_admission_exhaustion(repo, budget, cycles=50):
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient
+
+    base = tempfile.mkdtemp(prefix="d110-adm-")
+    adapter = None
+    problems = []
+    try:
+        roots, _fx = build_roots(base)
+        policies = build_policies(roots)
+        service = _make_gated_service(policies)
+        adapter = DriveHTTPAdapter(service=service, port=0, socket_timeout=5.0)
+        time.sleep(0.1)
+        fd0 = _nfd()
+        token = TOKENS[0]
+        payload = json.dumps({"source_id": "main", "file_id": "root",
+                              "limit": 20, "offset": 0}).encode("ascii")
+        req = _raw_request("/v1/list", token, payload)
+        results = []
+        deadline = time.monotonic() + budget
+        for cycle in range(cycles):
+            if time.monotonic() > deadline:
+                problems.append("admission stage exceeded its budget")
+                break
+            gate = _EntryGate(MAX_CONCURRENT)
+            service._gate = gate
+            cycle_out = {}
+
+            def occupier(slot):
+                raw, _e, _el = _raw_exchange(adapter.port, req, timeout=15.0)
+                cycle_out[("occupier", slot)] = _parse_resp(raw)
+
+            threads = [threading.Thread(target=occupier, args=(i,))
+                       for i in range(MAX_CONCURRENT)]
+            for t in threads:
+                t.start()
+            entered_ok = gate.entered.wait(timeout=20.0)
+            entered_count = gate.count
+            exc = _parse_resp(_raw_exchange(adapter.port, req, timeout=15.0)[0])
+            cycle_out[("excess", 0)] = exc
+            gate.release.set()
+            for t in threads:
+                t.join(timeout=20.0)
+            service._gate = None
+            occ = [cycle_out.get(("occupier", i), {}) for i in range(MAX_CONCURRENT)]
+            results.append({"cycle": cycle, "entered_ok": entered_ok,
+                            "entered_count": entered_count,
+                            "occupier_status": [o.get("status") for o in occ],
+                            "excess_code": exc.get("code")})
+        occ_ok = sum(1 for r in results for s in r["occupier_status"] if s == 200)
+        occ_bad = sum(1 for r in results for s in r["occupier_status"] if s != 200)
+        exc_busy = sum(1 for r in results if r["excess_code"] == "busy")
+        exc_unavail = sum(1 for r in results if r["excess_code"] == "unavailable")
+        exc_other = len(results) - exc_busy - exc_unavail
+        entered_misses = sum(1 for r in results if not r["entered_ok"])
+        if occ_ok != MAX_CONCURRENT * len(results):
+            problems.append("occupier successes %d != %d" % (occ_ok, MAX_CONCURRENT * len(results)))
+        if exc_busy != len(results):
+            problems.append("excess busy %d != %d cycles" % (exc_busy, len(results)))
+        if exc_unavail or exc_other:
+            problems.append("excess non-busy: unavailable=%d other=%d" % (exc_unavail, exc_other))
+        if entered_misses:
+            problems.append("entry barrier missed in %d cycle(s)" % entered_misses)
+        # recovery after overload: a fresh burst must all succeed
+        recovery_ok = 0
+        recovery_fail = []
+        try:
+            for i in range(60):
+                DriveClient(port=adapter.port, token=token, timeout=5.0).list("main", limit=20)
+                recovery_ok += 1
+        except Exception as exc2:  # noqa: BLE001
+            recovery_fail.append(_map_exc(exc2))
+        if recovery_ok != 60:
+            problems.append("post-overload recovery %d/60 ok" % recovery_ok)
+        closed = adapter.close(timeout=10.0)
+        threads_after = _adapter_threads()
+        fd1 = _nfd()
+        if not closed:
+            problems.append("adapter.close() did not return True")
+        if threads_after:
+            problems.append("adapter threads not reaped: %s" % threads_after)
+        if fd0 is not None and fd1 is not None and fd1 > fd0 + FD_BASELINE_SLACK:
+            problems.append("fd %s -> %s" % (fd0, fd1))
+        return {
+            "stage": "admission_exhaustion",
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "mode": "real-service-entry-barrier",
+            "cycles": len(results),
+            "occupier_success": occ_ok, "occupier_bad": occ_bad,
+            "excess_busy": exc_busy, "excess_unavailable": exc_unavail,
+            "excess_other": exc_other,
+            "recovery_ok": recovery_ok, "recovery_fail": recovery_fail,
+            "resources": {"fd_before": fd0, "fd_after": fd1, "closed": closed,
+                          "threads_after_close": threads_after},
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: isolation
+# ---------------------------------------------------------------------------
+def stage_isolation(repo, budget):
+    import urllib.parse
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient, DriveClientError
+
+    base = tempfile.mkdtemp(prefix="d110-iso-")
+    adapter = None
+    problems = []
+    try:
+        roots, _fx = build_roots(base)
+        policies = build_policies(roots)
+        # an outside sentinel the service must never reach
+        outside = os.path.join(base, "outside")
+        os.makedirs(outside, exist_ok=True)
+        sentinel = os.path.join(outside, "secret.txt")
+        with open(sentinel, "wb") as fh:
+            fh.write(b"OUTSIDE-SENTINEL")
+        sentinel_sha = sha256_bytes(open(sentinel, "rb").read())
+
+        # a symlink INSIDE the main root that points outside the root
+        link = os.path.join(roots["main"], "escape_link")
+        try:
+            os.symlink(outside, link)
+        except OSError:
+            pass
+        link_file = os.path.join(roots["main"], "escape_file")
+        try:
+            os.symlink(sentinel, link_file)
+        except OSError:
+            pass
+
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=5.0)
+        time.sleep(0.1)
+
+        cross = {}
+        # agent-other must not reach alias 'main'
+        try:
+            DriveClient(port=adapter.port, token=TOKENS[1], timeout=5.0).read(
+                "main", "p/readme.txt", offset=0, length=16)
+            cross["other_reads_main"] = "ALLOWED"
+        except DriveClientError as exc:
+            cross["other_reads_main"] = exc.code
+        try:
+            DriveClient(port=adapter.port, token=TOKENS[1], timeout=5.0).save(
+                "main", "p/savepool/cross.bin", b"x", overwrite=True)
+            cross["other_writes_main"] = "ALLOWED"
+        except DriveClientError as exc:
+            cross["other_writes_main"] = exc.code
+        if cross["other_reads_main"] != "denied":
+            problems.append("cross-agent read not denied: %s" % cross["other_reads_main"])
+        if cross["other_writes_main"] != "denied":
+            problems.append("cross-agent write not denied: %s" % cross["other_writes_main"])
+
+        hostile_ids = [
+            "p/../../etc/passwd",
+            "p/../secret",
+            "/etc/passwd",
+            "p//etc/passwd",
+            "p/sub/../../../../etc/hosts",
+            "p/" + "a" * 300,
+            "p/bad\x00name",
+            "p/.drive-tool-tmp-evil",
+            "p/escape_link/secret.txt",
+            "p/escape_file",
+        ]
+        hostile = {}
+
+        def _accepted(resp):
+            return resp.get("status") == 200 and resp.get("code") is None
+
+        for fid in hostile_ids:
+            key = repr(fid)
+            # (1) client boundary -- the client validates ids locally, so a
+            #     ValueError here is an expected client-side rejection, NOT an
+            #     unmapped product error.
+            try:
+                DriveClient(port=adapter.port, token=TOKENS[0], timeout=5.0).read(
+                    "main", fid, offset=0, length=16)
+                cr = "ALLOWED"
+            except DriveClientError as exc:
+                cr = exc.code
+            except ValueError:
+                cr = "client_rejected"
+            except Exception as exc:  # noqa: BLE001
+                cr = "raw:" + type(exc).__name__
+            try:
+                DriveClient(port=adapter.port, token=TOKENS[0], timeout=5.0).save(
+                    "main", fid, b"x", overwrite=True)
+                cs = "ALLOWED"
+            except DriveClientError as exc:
+                cs = exc.code
+            except ValueError:
+                cs = "client_rejected"
+            except Exception as exc:  # noqa: BLE001
+                cs = "raw:" + type(exc).__name__
+            # (2) SERVER boundary -- raw HTTP that bypasses client validation
+            body_r = json.dumps({"source_id": "main", "file_id": fid,
+                                 "offset": 0, "length": 16}).encode("utf-8")
+            srv_read = _parse_resp(_raw_exchange(
+                adapter.port, _raw_request("/v1/read", TOKENS[0], body_r),
+                timeout=5.0)[0])
+            body_l = json.dumps({"source_id": "main", "file_id": fid,
+                                 "limit": 20, "offset": 0}).encode("utf-8")
+            srv_list = _parse_resp(_raw_exchange(
+                adapter.port, _raw_request("/v1/list", TOKENS[0], body_l),
+                timeout=5.0)[0])
+            q = urllib.parse.urlencode({"source_id": "main", "file_id": fid,
+                                        "overwrite": "true", "create_parents": "true"})
+            srv_save = _parse_resp(_raw_exchange(
+                adapter.port, _raw_request("/v1/save?" + q, TOKENS[0], b"x",
+                                           ctype=b"application/octet-stream"),
+                timeout=5.0)[0])
+            hostile[key] = {"client_read": cr, "client_save": cs,
+                            "server_read": srv_read, "server_list": srv_list,
+                            "server_save": srv_save}
+            if cr == "ALLOWED" or cs == "ALLOWED":
+                problems.append("hostile file_id accepted at client: %s" % key)
+            if _accepted(srv_read) or _accepted(srv_list) or _accepted(srv_save):
+                problems.append("hostile file_id accepted at SERVER: %s -> %s"
+                                % (key, hostile[key]))
+            if cr.startswith("raw:") or cs.startswith("raw:"):
+                problems.append("unmapped client exception on hostile id: %s" % key)
+
+        # the outside sentinel must be byte-for-byte intact and unexposed
+        now_sha = sha256_bytes(open(sentinel, "rb").read())
+        if now_sha != sentinel_sha:
+            problems.append("outside sentinel was modified")
+        # and it must not appear in a listing of the root
+        listed = DriveClient(port=adapter.port, token=TOKENS[0], timeout=5.0).list(
+            "main", limit=100)
+        names = [i["name"] for i in listed["items"]]
+        if "secret.txt" in names:
+            problems.append("outside sentinel exposed in listing")
+
+        closed = adapter.close(timeout=10.0)
+        threads_after = _adapter_threads()
+        if not closed:
+            problems.append("adapter.close() did not return True")
+        if threads_after:
+            problems.append("adapter threads not reaped")
+        return {
+            "stage": "isolation",
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "cross_agent": cross,
+            "hostile_ids": hostile,
+            "sentinel_intact": now_sha == sentinel_sha,
+            "listed_names": names,
+            "resources": {"closed": closed, "threads_after_close": threads_after},
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 5: concurrent_ops
+# ---------------------------------------------------------------------------
+def stage_concurrent_ops(repo, budget):
+    sys.path.insert(0, repo)
+    from drive_tool.http_adapter import DriveHTTPAdapter
+    from drive_tool.service_client import DriveClient, DriveClientError
+
+    base = tempfile.mkdtemp(prefix="d110-conc-")
+    adapter = None
+    problems = []
+    try:
+        roots, _fx = build_roots(base)
+        policies = build_policies(roots)
+        adapter = DriveHTTPAdapter(policies, port=0, socket_timeout=10.0)
+        time.sleep(0.1)
+        fd0 = _nfd()
+
+        PAYLEN = 4096
+        payloads = [bytes([i]) * PAYLEN for i in range(1, 9)]
+        payload_shas = {sha256_bytes(p) for p in payloads}
+        WRITABLE = (0, 1, 4, 5)   # main, other, alias_a, alias_b
+
+        # (a) exactly one winner for a concurrent no-overwrite create.
+        #     Bounded to the adapter's in-flight capacity (MAX_CONCURRENT=6) so
+        #     a "busy" rejection cannot confound the winner count.
+        target = "p/savepool/race_create.bin"
+        winners = []
+        exists = []
+        other = []
+        lock = threading.Lock()
+
+        def creator(i):
+            try:
+                DriveClient(port=adapter.port, token=TOKENS[0], timeout=10.0).save(
+                    "main", target, payloads[i % len(payloads)], overwrite=False)
+                with lock:
+                    winners.append(i)
+            except DriveClientError as exc:
+                with lock:
+                    (exists if exc.code == "exists" else other).append(exc.code)
+            except Exception as exc:  # noqa: BLE001
+                with lock:
+                    other.append(type(exc).__name__)
+
+        threads = [threading.Thread(target=creator, args=(i,))
+                   for i in range(MAX_CONCURRENT)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30.0)
+        if len(winners) != 1:
+            problems.append("no-overwrite create winners=%d (expected 1)" % len(winners))
+        if len(exists) != MAX_CONCURRENT - 1:
+            problems.append("no-overwrite create exists=%d (expected %d)"
+                            % (len(exists), MAX_CONCURRENT - 1))
+        if other:
+            problems.append("no-overwrite create unexpected codes: %s" % other)
+
+        # (b) simultaneous overwrite + range reads of one file: every reader
+        #     must see a complete, untorn payload (atomic rename).  Kept within
+        #     capacity: 2 writers + 3 readers = 5 in-flight.
+        target2 = "p/savepool/race_over.bin"
+        DriveClient(port=adapter.port, token=TOKENS[0], timeout=10.0).save(
+            "main", target2, payloads[0], overwrite=True)
+        torn = []
+        write_err = []
+        stop = threading.Event()
+
+        def writer(i):
+            try:
+                while not stop.is_set():
+                    DriveClient(port=adapter.port, token=TOKENS[0], timeout=10.0).save(
+                        "main", target2, payloads[i % len(payloads)], overwrite=True)
+            except Exception as exc:  # noqa: BLE001
+                write_err.append(type(exc).__name__)
+
+        def reader(i):
+            try:
+                for _ in range(30):
+                    data = DriveClient(port=adapter.port, token=TOKENS[0], timeout=10.0).read(
+                        "main", target2, offset=0, length=PAYLEN).data
+                    if len(data) != PAYLEN or sha256_bytes(data) not in payload_shas:
+                        torn.append({"len": len(data), "sha": sha256_bytes(data)})
+            except Exception as exc:  # noqa: BLE001
+                torn.append({"exc": type(exc).__name__})
+
+        wthreads = [threading.Thread(target=writer, args=(i,)) for i in range(2)]
+        rthreads = [threading.Thread(target=reader, args=(i,)) for i in range(3)]
+        for t in wthreads:
+            t.start()
+        for t in rthreads:
+            t.start()
+        for t in rthreads:
+            t.join(timeout=60.0)
+        stop.set()
+        for t in wthreads:
+            t.join(timeout=30.0)
+        if torn:
+            problems.append("torn/inconsistent reads: %s" % torn[:5])
+        if write_err:
+            problems.append("concurrent overwrite errors: %s" % sorted(set(write_err)))
+
+        # (c) simultaneous create across distinct files by distinct WRITABLE
+        #     agents (read-only / size-capped personas are exercised in other
+        #     stages), bounded to capacity.
+        multi = []
+        mlock = threading.Lock()
+
+        def multi_save(i):
+            agent = WRITABLE[i % len(WRITABLE)]
+            alias = PERSONAS[agent][2]
+            try:
+                DriveClient(port=adapter.port, token=TOKENS[agent], timeout=10.0).save(
+                    alias, "p/savepool/multi_%02d.bin" % i, payloads[i % len(payloads)],
+                    overwrite=False)
+                with mlock:
+                    multi.append("ok")
+            except DriveClientError as exc:
+                with mlock:
+                    multi.append(exc.code)
+            except Exception as exc:  # noqa: BLE001
+                with mlock:
+                    multi.append("raw:" + type(exc).__name__)
+
+        mthreads = [threading.Thread(target=multi_save, args=(i,))
+                    for i in range(MAX_CONCURRENT)]
+        for t in mthreads:
+            t.start()
+        for t in mthreads:
+            t.join(timeout=30.0)
+        bad_multi = [m for m in multi if m != "ok"]
+        if bad_multi:
+            problems.append("multi-agent create failures: %s" % bad_multi)
+
+        orphans = _scan_temp(base)
+        if orphans:
+            problems.append("temp residue after concurrent ops: %s" % orphans[:5])
+
+        closed = adapter.close(timeout=10.0)
+        threads_after = _adapter_threads()
+        fd1 = _nfd()
+        if not closed:
+            problems.append("adapter.close() did not return True")
+        if threads_after:
+            problems.append("adapter threads not reaped")
+        if fd0 is not None and fd1 is not None and fd1 > fd0 + FD_BASELINE_SLACK:
+            problems.append("fd %s -> %s" % (fd0, fd1))
+        return {
+            "stage": "concurrent_ops",
+            "result": "PASS" if not problems else "FAIL",
+            "problems": problems,
+            "create_winners": len(winners), "create_exists": len(exists),
+            "create_other": other,
+            "torn_reads": torn[:5], "torn_count": len(torn),
+            "overwrite_errors": sorted(set(write_err)),
+            "multi_agent": multi,
+            "temp_residue": orphans,
+            "resources": {"fd_before": fd0, "fd_after": fd1, "closed": closed,
+                          "threads_after_close": threads_after},
+        }
+    finally:
+        if adapter is not None:
+            try:
+                adapter.close(timeout=5.0)
+            except BaseException:
+                pass
+        import shutil
+        shutil.rmtree(base, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 6: crash_kill (synchronized child SIGKILL + fresh recovery + orphan audit)
+# ---------------------------------------------------------------------------
