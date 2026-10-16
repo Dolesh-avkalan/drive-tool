@@ -1,0 +1,102 @@
+D105 FINAL NARROW HTTP security delta review. PriorD084 fullsource8cd137f7 ACCEPT; exactfinal337e4c7 production41279e6290617968c3b4f3f91fc3cf9a7dab505a differs ONLYclose caller-budgettimedlock andbusy10/20/20msphasebudget below. Wholecandidate581suite+freshindependent600/10000+strict50cyclesaturation/D101aggregateexit0 PASS3.11/3.12, noyourtestclaim. Review changedcode only, no duplicatefullaudit: singlecallerclosebudgetincludeslockwait, releasefinally/onceonlylistenerwake/noactiveFDcrossclose; busyshared50ms/16KiB/fixed7threads/noqueue/FS, reservedwritephase vs transportbest-effort. Existingheader/auth/schema unchanged: missing/unextractablesource403, authorizedextractablebadschema400, hugeCL413postlexgate, leadingzeroboundeddecimalaccepted. No OSscheduler/syscallcancellationguarantee or privatepolicyAPI. Return concise ACCEPT or CHANGES REQUIRED for exactproductiondelta withconcreteblockingcounterexample, TESTS_NOT_RUN. No implementation/newfeatures/rewrite. Previous46Kprompt failednostart; this is independentcompactdelta only. Fullbaselinereview remainsD084, no sourcechanges hidden.
+EXACT PRODUCTION DIFF
+diff --git a/drive_tool/http_adapter.py b/drive_tool/http_adapter.py
+index 8cd137f..41279e6 100644
+--- a/drive_tool/http_adapter.py
++++ b/drive_tool/http_adapter.py
+@@ -44,6 +44,9 @@ __all__ = [
+     "DEFAULT_DRAIN_TIMEOUT_SECONDS",
+     "ACCEPT_POLL_INTERVAL_SECONDS",
+     "BUSY_REJECT_BUDGET_SECONDS",
++    "BUSY_PRE_READ_BUDGET_SECONDS",
++    "BUSY_WRITE_RESERVE_SECONDS",
++    "BUSY_POST_DRAIN_BUDGET_SECONDS",
+     "MAX_BUSY_READ_BYTES",
+     "POST_RESPONSE_DRAIN_SECONDS",
+     "MAX_DRAIN_BYTES",
+@@ -61,7 +64,10 @@ MAX_READ_BODY_BYTES = 1048576
+ DEFAULT_SOCKET_TIMEOUT_SECONDS = 5.0
+ DEFAULT_DRAIN_TIMEOUT_SECONDS = 5.0
+ ACCEPT_POLL_INTERVAL_SECONDS = 0.05
+-BUSY_REJECT_BUDGET_SECONDS = 0.05
++BUSY_REJECT_BUDGET_SECONDS = 0.050
++BUSY_PRE_READ_BUDGET_SECONDS = 0.010
++BUSY_WRITE_RESERVE_SECONDS = 0.020
++BUSY_POST_DRAIN_BUDGET_SECONDS = 0.020
+ MAX_BUSY_READ_BYTES = 16384
+ POST_RESPONSE_DRAIN_SECONDS = 0.05
+ MAX_DRAIN_BYTES = 65536
+@@ -396,12 +402,19 @@ class DriveHTTPAdapter:
+         if not math.isfinite(timeout_f) or timeout_f < 0.0:
+             raise ValueError("timeout must be a finite non-negative number")
+ 
+-        with self._close_lock:
++        deadline = time.monotonic() + timeout_f
++        remaining = deadline - time.monotonic()
++        if remaining <= 0.0:
++            acquired = self._close_lock.acquire(blocking=False)
++        else:
++            acquired = self._close_lock.acquire(timeout=remaining)
++        if not acquired:
++            return False
++
++        try:
+             if self._closed:
+                 return True
+ 
+-            deadline = time.monotonic() + timeout_f
+-
+             with self._pool_cond:
+                 should_close_listener = not self._listener_closed
+                 self._listener_closed = True
+@@ -450,6 +463,8 @@ class DriveHTTPAdapter:
+                 self._closed = True
+                 return True
+             return False
++        finally:
++            self._close_lock.release()
+ 
+     def _wake_listener(self):
+         port = self._port
+@@ -528,10 +543,16 @@ class DriveHTTPAdapter:
+     # ----- busy rejection -------------------------------------------------
+ 
+     def _busy_reject(self, conn):
+-        busy_deadline = time.monotonic() + BUSY_REJECT_BUDGET_SECONDS
++        now = time.monotonic()
++        busy_deadline = now + BUSY_REJECT_BUDGET_SECONDS
+         total_read = 0
+ 
+-        remaining = busy_deadline - time.monotonic()
++        # Phase 1: bounded pre-read. Must not consume the reserved write slice.
++        pre_read_deadline = min(
++            now + BUSY_PRE_READ_BUDGET_SECONDS,
++            busy_deadline - BUSY_WRITE_RESERVE_SECONDS,
++        )
++        remaining = pre_read_deadline - time.monotonic()
+         if remaining > 0:
+             try:
+                 conn.settimeout(remaining)
+@@ -541,6 +562,7 @@ class DriveHTTPAdapter:
+             except (socket.timeout, OSError, ValueError):
+                 pass
+ 
++        # Phase 2: reserved write window inside the same 50ms outer ceiling.
+         body = (
+             b'{"ok":false,"error":{"code":"busy",'
+             b'"outcome_uncertain":false,"retry_safe":true}}'
+@@ -560,8 +582,13 @@ class DriveHTTPAdapter:
+         except OSError:
+             pass
+ 
++        # Phase 3: bounded post-write drain; never exceeds 16 KiB or outer deadline.
++        drain_deadline = min(
++            busy_deadline,
++            time.monotonic() + BUSY_POST_DRAIN_BUDGET_SECONDS,
++        )
+         while total_read < MAX_BUSY_READ_BYTES:
+-            remaining = busy_deadline - time.monotonic()
++            remaining = drain_deadline - time.monotonic()
+             if remaining <= 0:
+                 break
+             try:
