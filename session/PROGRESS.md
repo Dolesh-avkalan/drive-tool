@@ -381,3 +381,5 @@ Collected D074 securityreview and routed concrete findings1/2/4 toDeepSeekD080, 
 User status livecheck: identifiedGeminiD075 failed ratherthanrunning; collectedDeepSeekD078/D080 fixes. DispatchedlocalD081 actualHTTPpatchverification, cloudD083 smallersemanticdecision andD082 runnerverification. Rebasedownunpushedbustask afternonFFrace, noforce. No acceptance claims.
 
 Progresscheck collectedD081 actualpatchedHTTPexecution: fixedconfirmedframing/priority/repeatclose,4passingnewtests,10knownfailuresremain. Queued focusedGeminiD084delta; authdecisionD083pending. No acceptance/soakclaim.
+
+00:16UTC collectedD083/D082; settledcapabilitycontract without privateAPI/newrestrictions, dispatchedlocalD085correcttests/actualgatedHTTPstress. Runnerpatchhadone-tokenimportbug and2messageassertions; queuedshortSarvamD086 exactcorrection+18negativegates. No productionrewrite or acceptanceclaim.
