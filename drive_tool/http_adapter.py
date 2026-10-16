@@ -396,11 +396,18 @@ class DriveHTTPAdapter:
         if not math.isfinite(timeout_f) or timeout_f < 0.0:
             raise ValueError("timeout must be a finite non-negative number")
 
-        with self._close_lock:
+        deadline = time.monotonic() + timeout_f
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            acquired = self._close_lock.acquire(blocking=False)
+        else:
+            acquired = self._close_lock.acquire(timeout=remaining)
+        if not acquired:
+            return False
+
+        try:
             if self._closed:
                 return True
-
-            deadline = time.monotonic() + timeout_f
 
             with self._pool_cond:
                 should_close_listener = not self._listener_closed
@@ -450,6 +457,8 @@ class DriveHTTPAdapter:
                 self._closed = True
                 return True
             return False
+        finally:
+            self._close_lock.release()
 
     def _wake_listener(self):
         port = self._port
