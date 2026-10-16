@@ -1,5 +1,10 @@
 # Instructions for future directors and agents
 
+**OWNER DIRECTIVE 2026-10-16 ~06:05 UTC — READ session/OWNER-DIRECTIVE-2026-10-16.md BEFORE ANY OTHER WORK.**
+Dolesh (owner) cannot reach Codex; this was written at his request. Summary: stop the harsh-test loop
+(record D122 as DEFERRED); release gate = suite + one 6-agent normal-use smoke run; Google Drive via an
+rclone design note first, no custom connector; less churn; then the authorized PC shutdown.
+
 Start with session/START_HERE.md, then session/STATUS.md, session/DECISIONS.md, session/PROGRESS.md, and session/CONNECTIONS.md. Read README.md for architecture and tasks/ for the active brief.
 These files record this project's continuity. Verify live repository heads and host status before acting; a checkpoint is historical evidence, not proof that a service is still running.
 

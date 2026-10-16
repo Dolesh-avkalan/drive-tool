@@ -1,5 +1,10 @@
 # Resume Drive Tool
 
+**OWNER DIRECTIVE 2026-10-16 ~06:05 UTC — READ session/OWNER-DIRECTIVE-2026-10-16.md BEFORE ANY OTHER WORK.**
+Dolesh (owner) cannot reach Codex; this was written at his request. Summary: stop the harsh-test loop
+(record D122 as DEFERRED); release gate = suite + one 6-agent normal-use smoke run; Google Drive via an
+rclone design note first, no custom connector; less churn; then the authorized PC shutdown.
+
 Read session/STATUS.md first. Approved PR #4 is merged as0d9aa8f. D040 bounded range reads is active with browser Sarvam; do not duplicate it. Current STATUS supersedes every historical active-task statement below.
 
 # Resume Drive Tool here
