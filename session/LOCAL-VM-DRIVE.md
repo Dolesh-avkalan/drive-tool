@@ -18,3 +18,18 @@ Recovery backup: `/var/backups/browser-drive-20261016T143523Z`. Existing test lo
 Four-lane deployment check: hostd logged all four routed lanes, and four tasks opened their respective sites in separate windows. DeepSeek and Grok reported `blocked` because those sites are not signed in locally; their task records and project history were saved to the local Drive. No login bypass was attempted. Lane service processes plus the browser used about 1.0 GiB at idle and 1.4–1.7 GiB during these short checks, within the unchanged 4 GiB VM allocation. End-to-end task results remain in the local bus.
 
 After the user signed into DeepSeek and Grok, a second four-lane exercise completed **4/4 done** on 2026-10-16, 14:49–14:51 UTC. Each agent contributed a distinct short operating-guide section: Gemini design rules (3.5 Flash-Lite/low, routine draft only), DeepSeek task template, Sarvam evidence checklist, Grok practical review (Fast). All used `project: four-lane-demo`, loaded its MEMORY.md and saved a separate bare answer to `notes/<agent>.md`. The local Drive directly contained all four notes, four full task records and exactly four history lines. Start windows opened within 13 seconds; final completion was about 2 minutes 13 seconds after queue submission. Gemini and Grok needed model-picker retries, so this is a successful short functional exercise, not a sustained reliability or security-isolation claim. About 1.7 GiB RAM used afterward; roughly 2.2 GiB available.
+
+## Windows Explorer read-only access
+
+Native Samba share installed from DeepSeek-authored scripts, following Gemini design and exact-script reviews. The last static blocker was corrected with an exact `Get-Item -Force` diff; actual Windows deployment also exposed PowerShell-to-Linux CRLF password handling, corrected by DeepSeek with trailing-CR normalization and terminating mapping errors. No project ownership, modes or ACLs changed.
+
+- UNC: `\\172.22.171.193\AgentProjects`.
+- Desktop shortcut: `AgentProjects (read-only).lnk`.
+- Dedicated Samba-only `agent_ro` identity; SMB operations run as `bh` but server share is read-only. `bh` retains its normal writer capability.
+- SMB2.1 or later, TCP 445 only, bound to loopback and private VM `eth0`; exact Windows virtual-adapter IP allowlist `172.22.160.1/32`. No guest, NetBIOS or symlink following. No global firewall changes.
+- Random password retained only in user-protected Windows DPAPI credential storage; never committed or sent to teammates. No Windows third-party filesystem software installed.
+- Live Windows verification: mapping status OK, actual project MEMORY.md readable; newly created owner-only VM fixture readable; create, overwrite, rename and delete all returned access denied; an outside-root synthetic symlink was inaccessible. All temporary verification fixtures were removed on the VM afterward.
+- Existing browser, four lanes, Drive, viewer gateway and tunnel services remained active. Temporary package startup policy was removed after install.
+- VM/Windows private IPs can change with the Hyper-V Default Switch. If that happens, rerun the private setup script with current IPs to update binding/allowlist and recreate the shortcut. This does not synchronize cloud storage.
+
+Team draft/review evidence and task records are in the local Drive project `local-explorer-access`. Private deployment scripts are in the Windows workspace `work/local-config/`. The scoped completion heartbeat was deleted once verification passed.
