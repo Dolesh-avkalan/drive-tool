@@ -1,16 +1,16 @@
-# Drive Tool current status — 2026-10-16 13:40 UTC
+# Drive Tool current status — 2026-10-17 13:50 UTC
 
-**Summary (2026-10-16 13:40 UTC):**
+**Summary (2026-10-17 13:50 UTC):**
 1. Local drive service USABLE: deployed on the browser host (directortemp) as `bh-drive`, 127.0.0.1:8940, data /var/lib/agent-drive/projects.
-2. Launcher drive_tool/serve.py merged to main (PR #11, 6391049); 603 tests OK as non-root.
-3. Release gate passed earlier on 321ccae (drop drive-tool/release/dt03-release-gate/).
-4. browser-tool PRs #40 and #41 wire it in; box at 0a23a00, 14 services active.
-5. Relay tasks use `read:/attach:/save_to: drive:<project>/<path>`; each drive save appends to `<project>/history/YYYY-MM.md`.
-6. Live check dv01-dv03 (browser-bus, 13:31-13:35 UTC): save, read and the history log all worked.
-7. Evidence and caveats: browser-tool docs/STATUS.md, section "Shared agent drive".
+2. New: `drive_tool/local_move.py` (LocalMover): move a file (no overwrite, files only) and trash (hidden `.drive-tool-tmp-trash` at the root; nothing is ever deleted). PR #15, plans dt7-dt10.
+3. LocalMover gates: Gemini 4 Argon security review ACCEPT (dt8), Sarvam review ACCEPT after one fix round (dt10), 685 tests OK on the branch head in the box sandbox (non-root).
+4. LocalMover is a library only: not yet wired into file_service / the HTTP service, so agents cannot call move/trash yet. That wiring is the next step.
+5. Edge-case tests for listing, storage, service_policy, serve merged (PR #14, plans dt3-dt6).
+6. Work now runs as plans on browser-tool's browser-bus branch: DeepSeek codes, Sarvam reviews and publishes branches/PRs, Gemini does security, the box runs the tests; see browser-tool HANDOFF.md.
+7. Google Drive: rclone design note first (drop drive-tool/release/dt01-rclone-design.md); needs Dolesh's decision and Google sign-in.
 8. D122 (harsh-test loop) DEFERRED by owner directive 2026-10-16.
-9. Next: Google Drive backup = rclone sync, needs Dolesh's Google sign-in (design note drop drive-tool/release/dt01-rclone-design.md).
-10. The rest of this file is the 2026-10-15 heartbeat, kept as history; its URGENT PC-shutdown note is from 06:10 UTC 2026-10-16 (the PC appeared off at 06:06 UTC, commit b33b6b6).
+9. Evidence: plan summaries on browser-tool's browser-bus (plans/dt*.summary.md) and the shared drive (drive-tool/plans/).
+10. The rest of this file is history (2026-10-15 heartbeat and earlier); its URGENT PC-shutdown note is from 2026-10-16 and is done.
 
 ## 2026-10-15 18:00 UTC heartbeat (historical)
 
