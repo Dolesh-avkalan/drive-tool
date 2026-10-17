@@ -92,9 +92,6 @@ class LocalMover:
     ) -> int:
         return os.open(path, flags, mode, dir_fd=dir_fd)
 
-    def _os_close(self, fd: int) -> None:
-        os.close(fd)
-
     def _os_link(
         self,
         src: str,

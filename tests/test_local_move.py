@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from drive_tool.local import (
     TEMP_PREFIX,
@@ -20,6 +22,7 @@ from drive_tool.storage import (
     AlreadyExistsError,
     FileRef,
     IsDirectoryError,
+    NotDirectoryError,
     SourceMismatchError,
 )
 
@@ -229,6 +232,189 @@ class TestTrash(BaseLocalMoveTest):
         with self.assertRaises(UnsupportedEntryError):
             self.mover.trash(self._ref("p/link"))
         self.assertTrue(os.path.isdir(os.path.join(self.root, "adir")))
+
+class TestMoveUnlinkSourceFailure(BaseLocalMoveTest):
+    """The link succeeds but the source unlink fails: no data is lost."""
+
+    def test_unlink_failure_reports_both_names_exist(self) -> None:
+        payload = b"survives-a-failed-unlink"
+        src = self._write("root", "a.txt", payload)
+
+        def failing_unlink(path: str, *, dir_fd: int) -> None:
+            raise OSError(errno.EIO, "injected unlink failure")
+
+        with mock.patch.object(self.mover, "_os_unlink", failing_unlink):
+            with self.assertRaises(LocalStorageError) as ctx:
+                self.mover.move(src, self._root_ref(), "b.txt")
+        self.assertIn("both names now exist", str(ctx.exception))
+
+        # Both names exist and hold the same bytes.
+        self.assertTrue(os.path.exists(os.path.join(self.root, "a.txt")))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "b.txt")))
+        with open(os.path.join(self.root, "a.txt"), "rb") as f:
+            self.assertEqual(f.read(), payload)
+        with open(os.path.join(self.root, "b.txt"), "rb") as f:
+            self.assertEqual(f.read(), payload)
+
+    def test_trash_unlink_failure_keeps_source_and_trash_copy(self) -> None:
+        payload = b"trash-survives"
+        src = self._write("root", "t.txt", payload)
+
+        def failing_unlink(path: str, *, dir_fd: int) -> None:
+            raise OSError(errno.EIO, "injected unlink failure")
+
+        with mock.patch.object(self.mover, "_os_unlink", failing_unlink):
+            with self.assertRaises(LocalStorageError):
+                self.mover.trash(src)
+
+        self.assertTrue(os.path.exists(os.path.join(self.root, "t.txt")))
+        trash_path = os.path.join(self.root, TRASH_DIR)
+        entries = os.listdir(trash_path)
+        self.assertEqual(len(entries), 1)
+        with open(os.path.join(trash_path, entries[0]), "rb") as f:
+            self.assertEqual(f.read(), payload)
+
+class TestMoveInodeVerifyMismatch(BaseLocalMoveTest):
+    """After the link, the destination inode differs: link removed, source kept."""
+
+    def _patch_dst_stat(self, src_st: os.stat_result) -> None:
+        """Make the destination stat report a different (st_dev, st_ino)."""
+
+        def forged_stat(path: str, *, dir_fd: int) -> os.stat_result:
+            fields = list(src_st)
+            fields[1] = src_st.st_ino + 1  # st_ino
+            return os.stat_result(fields)
+
+        self.adapter._os_stat_nofollow = forged_stat  # type: ignore[method-assign]
+
+    def test_mismatched_inode_removes_link_and_keeps_source(self) -> None:
+        payload = b"original-bytes"
+        src = self._write("root", "a.txt", payload)
+        src_real = os.stat(os.path.join(self.root, "a.txt"))
+        self._patch_dst_stat(src_real)
+
+        with self.assertRaises(LocalStorageError) as ctx:
+            self.mover.move(src, self._root_ref(), "b.txt")
+        self.assertIn("changed while moving", str(ctx.exception))
+
+        # The just-created destination link was removed; source is untouched.
+        self.assertTrue(os.path.exists(os.path.join(self.root, "a.txt")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "b.txt")))
+        with open(os.path.join(self.root, "a.txt"), "rb") as f:
+            self.assertEqual(f.read(), payload)
+
+    def test_trash_mismatched_inode_removes_link_and_keeps_source(self) -> None:
+        payload = b"trash-original"
+        src = self._write("root", "t.txt", payload)
+        src_real = os.stat(os.path.join(self.root, "t.txt"))
+        self._patch_dst_stat(src_real)
+
+        with self.assertRaises(LocalStorageError):
+            self.mover.trash(src)
+
+        self.assertTrue(os.path.exists(os.path.join(self.root, "t.txt")))
+        trash_path = os.path.join(self.root, TRASH_DIR)
+        self.assertEqual(os.listdir(trash_path), [])
+        with open(os.path.join(self.root, "t.txt"), "rb") as f:
+            self.assertEqual(f.read(), payload)
+
+class TestMoveNameValidation(BaseLocalMoveTest):
+    def _check_rejected(
+        self, new_name: object, expected=UnsafePathError
+    ) -> None:
+        src = self._write("root", "a.txt", b"x")
+        with self.assertRaises(expected):
+            self.mover.move(src, self._root_ref(), new_name)  # type: ignore[arg-type]
+        self.assertTrue(os.path.exists(os.path.join(self.root, "a.txt")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "b.txt")))
+
+    def test_empty_name_rejected(self) -> None:
+        self._check_rejected("")
+
+    def test_dot_name_rejected(self) -> None:
+        self._check_rejected(".")
+
+    def test_dotdot_name_rejected(self) -> None:
+        self._check_rejected("..")
+
+    def test_slash_name_rejected(self) -> None:
+        self._check_rejected("a/b")
+
+    def test_nul_name_rejected(self) -> None:
+        self._check_rejected("a\x00b")
+
+    def test_temp_prefix_name_rejected(self) -> None:
+        self._check_rejected(TEMP_PREFIX + "abc")
+
+    def test_over_255_byte_name_rejected(self) -> None:
+        self._check_rejected("a" * 256)
+
+    def test_non_str_name_rejected(self) -> None:
+        self._check_rejected(123, expected=UnsafePathError)
+
+class TestMoveDestParentIsFile(BaseLocalMoveTest):
+    def test_dest_parent_is_file_raises_not_directory_error(self) -> None:
+        src = self._write("root", "a.txt", b"x")
+        # "afile" exists as a regular file; its p/ id is used as a parent.
+        self._write("root", "afile", b"not-a-dir")
+        with self.assertRaises(NotDirectoryError):
+            self.mover.move(src, self._ref("p/afile"), "b.txt")
+        self.assertTrue(os.path.exists(os.path.join(self.root, "a.txt")))
+
+    def test_source_parent_is_file_raises_not_directory_error(self) -> None:
+        self._write("root", "afile", b"not-a-dir")
+        bad_source = self._ref("p/afile/child")
+        with self.assertRaises(NotDirectoryError):
+            self.mover.move(bad_source, self._root_ref(), "b.txt")
+
+class TestTrashDirIsSymlink(BaseLocalMoveTest):
+    def test_trash_dir_symlink_rejected_nothing_moved(self) -> None:
+        outside = os.path.join(self._tmpdir, "outside-trash")
+        os.mkdir(outside)
+        os.symlink(outside, os.path.join(self.root, TRASH_DIR))
+        src = self._write("root", "a.txt", b"keep")
+
+        with self.assertRaises(UnsafePathError):
+            self.mover.trash(src)
+
+        self.assertTrue(os.path.exists(os.path.join(self.root, "a.txt")))
+        self.assertTrue(os.path.islink(os.path.join(self.root, TRASH_DIR)))
+        self.assertEqual(os.listdir(outside), [])
+
+class TestTrashLongMultibyteName(BaseLocalMoveTest):
+    def test_long_multibyte_name_truncated_to_255_bytes_valid_utf8(self) -> None:
+        # Each emoji is 4 UTF-8 bytes. 63 emoji = 252 bytes, which is <= the
+        # writer's 255-byte limit (so it can be created) but > the trash-name
+        # budget of 230 bytes (255 - the 25-byte prefix), so the truncation
+        # loop in _make_trash_name must actually run.
+        char = "\U0001F600"
+        long_name = char * 63
+        self.assertEqual(len(long_name.encode("utf-8")), 252)
+        self.assertLessEqual(len(long_name.encode("utf-8")), 255)
+        self.assertGreater(len(long_name.encode("utf-8")), 230)
+
+        src = self._write("root", long_name, b"payload")
+        meta = self.mover.trash(src)
+
+        entry = meta.ref.file_id.split("/")[-1]
+        encoded = entry.encode("utf-8")
+        self.assertLessEqual(len(encoded), 255)
+        # Genuinely truncated: shorter than prefix + original.
+        prefix_len = len(entry) - len(
+            entry.split("-", 2)[-1]
+        )
+        self.assertLess(
+            len(encoded),
+            len(long_name.encode("utf-8")) + prefix_len,
+        )
+        # Valid UTF-8: no split code point at the cut.
+        self.assertEqual(encoded.decode("utf-8"), entry)
+
+        trash_path = os.path.join(self.root, TRASH_DIR)
+        self.assertEqual(os.listdir(trash_path), [entry])
+        with open(os.path.join(trash_path, entry), "rb") as f:
+            self.assertEqual(f.read(), b"payload")
+        self.assertFalse(os.path.exists(os.path.join(self.root, long_name)))
 
 @unittest.skipIf(_IS_ROOT, "permission semantics differ for root")
 class TestMovePermissionDenied(BaseLocalMoveTest):
