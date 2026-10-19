@@ -52,7 +52,7 @@ def make_agent(agent_id: str = 'a',
 class ConstantsTests(unittest.TestCase):
     def test_operations_exact(self):
         self.assertEqual(OPERATIONS,
-                         frozenset({'find', 'list', 'read', 'save'}))
+                         frozenset({'find', 'list', 'read', 'save', 'move', 'trash'}))
 
     def test_max_transfer_bytes(self):
         self.assertEqual(MAX_TRANSFER_BYTES, 1048576)

@@ -1,7 +1,7 @@
 """Launcher for the drive-tool loopback HTTP service (standard library only).
 
 Reads a strict JSON config file, builds the frozen policy objects from
-``service_policy``, starts a :class:`DriveHTTPAdapter` on loopback, and waits
+``service_policy``, starts a :class:`MoveHTTPAdapter` on loopback, and waits
 for a stop event. No filesystem access beyond config stat/read and the
 ``os.path.isdir`` root checks; no network beyond the adapter itself.
 """
@@ -16,13 +16,14 @@ import signal
 import sys
 import threading
 
-from drive_tool.http_adapter import DriveHTTPAdapter
+from drive_tool.file_service_move import MovableFileService
+from drive_tool.http_move import MoveHTTPAdapter
 from drive_tool.service_policy import AgentPolicy, SourceGrant
 
 __all__ = ["ConfigError", "load_config", "hash_token", "run", "main"]
 
 _MAX_CONFIG_BYTES = 1024 * 1024
-_OPERATIONS = frozenset({"list", "find", "read", "save"})
+_OPERATIONS = frozenset({"list", "find", "read", "save", "move", "trash"})
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 _TOP_KEYS = frozenset({"port", "agents"})
@@ -231,7 +232,8 @@ def run(config_path, *, ready=None, stop=None):
     """Load config, start the adapter, wait for ``stop``, then close."""
 
     port, agents = load_config(config_path)
-    adapter = DriveHTTPAdapter(agents, port=port)
+    service = MovableFileService(agents)
+    adapter = MoveHTTPAdapter(service=service, port=port)
     try:
         if ready is not None:
             ready(adapter.port)
@@ -284,7 +286,8 @@ def main(argv=None):
     old_term = signal.signal(signal.SIGTERM, _handle_signal)
     old_int = signal.signal(signal.SIGINT, _handle_signal)
     try:
-        adapter = DriveHTTPAdapter(agents, port=port)
+        service = MovableFileService(agents)
+        adapter = MoveHTTPAdapter(service=service, port=port)
         try:
             sys.stderr.write(
                 "drive-tool listening on 127.0.0.1:%d (%d agents)\n"
