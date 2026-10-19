@@ -20,6 +20,13 @@ Every expected error code/value is taken from the attached code:
 ``exists`` / ``not_found`` / ``denied`` / ``invalid`` from
 ``file_service`` and ``local_move``, 400 ``invalid`` / 403 ``denied`` / 503
 ``unavailable`` from ``http_adapter``, and ``ConfigError`` from ``serve``.
+
+Depth semantics (fixed code record ``dt13-code-1.md``): ``move``/``trash``
+bound the *parent* depth like ``LocalFileService.save``:
+``len(source_parts) - 1 > SERVICE_MAX_DEPTH`` -> invalid, and for the move
+destination ``len(dest_parts) > SERVICE_MAX_DEPTH`` -> invalid.  So a file
+whose parent sits exactly at ``SERVICE_MAX_DEPTH`` is addressable, and one
+level deeper is rejected.
 """
 
 from __future__ import annotations
@@ -112,7 +119,9 @@ class _TempRoots(unittest.TestCase):
         self.addCleanup(self._rm)
 
     def _rm(self) -> None:
-        shutil.rmtree(self._tmp.name, ignore_errors=True)
+        # Use TemporaryDirectory.cleanup() (not a bare rmtree) so the
+        # tempdir is properly unregistered and no ResourceWarnings leak.
+        self._tmp.cleanup()
 
     def _mkdir(self, rel: str) -> Path:
         path = self.base_dir / rel
@@ -202,6 +211,98 @@ class MoveServiceTests(_TempRoots):
         self.assertIsNone(err.__cause__)
         self.assertEqual((self.root / "src.txt").read_bytes(), b"SRC-BYTES")
         self.assertEqual((self.root / "taken.txt").read_bytes(), b"TARGET-BYTES")
+
+    def test_move_directory_invalid(self) -> None:
+        # LocalMover.move raises IsDirectoryError (a StorageError) inside the
+        # leased write, so the service maps it through
+        # _translate_storage_exception(..., is_write_in_flight=True): code is
+        # "invalid" with outcome_uncertain=True / retry_safe=False, exactly
+        # as save reports write-in-flight storage failures.
+        service, token = self._service()
+        self._mkdir("root/somedir")
+        with self.assertRaises(ServiceError) as ctx:
+            service.move(token, "work", "p/somedir", "root", "other")
+        err = ctx.exception
+        self.assertEqual(err.code, "invalid")
+        self.assertTrue(err.outcome_uncertain)
+        self.assertFalse(err.retry_safe)
+
+    def test_move_at_parent_depth_boundary_ok(self) -> None:
+        # Parent depth exactly SERVICE_MAX_DEPTH is addressable (same rule as
+        # save, which bounds the parent).  Build "p/d0/d1/.../d{N-1}/f.txt".
+        service, token = self._service()
+        parent_rel = "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH))
+        self._mkdir("root/" + parent_rel)
+        file_id = "p/%s/deep.txt" % parent_rel
+        self._write(self.root / parent_rel / "deep.txt", b"deep")
+        self._mkdir("root/target")
+        res = service.move(token, "work", file_id, "p/target", "moved.txt")
+        self.assertEqual(
+            res, {"ref": {"source_id": "work", "file_id": "p/target/moved.txt"}}
+        )
+        self.assertEqual((self.root / "target" / "moved.txt").read_bytes(), b"deep")
+        self.assertFalse((self.root / parent_rel / "deep.txt").exists())
+
+    def test_move_too_deep_invalid(self) -> None:
+        # Parent depth SERVICE_MAX_DEPTH + 1 exceeds the bound -> invalid.
+        service, token = self._service()
+        parent_rel = "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH + 1))
+        file_id = "p/%s/f.txt" % parent_rel
+        with self.assertRaises(ServiceError) as ctx:
+            service.move(token, "work", file_id, "root", "g.txt")
+        self.assertEqual(ctx.exception.code, "invalid")
+        self.assertFalse(ctx.exception.outcome_uncertain)
+
+    def test_move_too_deep_destination_invalid(self) -> None:
+        # Destination parent depth SERVICE_MAX_DEPTH + 1 exceeds the bound.
+        service, token = self._service()
+        self._write(self.root / "a.txt", b"a")
+        dest_rel = "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH + 1))
+        with self.assertRaises(ServiceError) as ctx:
+            service.move(token, "work", "p/a.txt", "p/" + dest_rel, "b.txt")
+        self.assertEqual(ctx.exception.code, "invalid")
+        self.assertFalse(ctx.exception.outcome_uncertain)
+        self.assertTrue((self.root / "a.txt").exists())
+
+    def test_move_destination_at_depth_boundary_ok(self) -> None:
+        # Destination parent depth exactly SERVICE_MAX_DEPTH is allowed.
+        service, token = self._service()
+        self._write(self.root / "a.txt", b"aaa")
+        dest_rel = "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH))
+        self._mkdir("root/" + dest_rel)
+        res = service.move(token, "work", "p/a.txt", "p/" + dest_rel, "b.txt")
+        self.assertEqual(
+            res,
+            {"ref": {"source_id": "work", "file_id": "p/%s/b.txt" % dest_rel}},
+        )
+        self.assertEqual((self.root / dest_rel / "b.txt").read_bytes(), b"aaa")
+
+    def test_trash_at_parent_depth_boundary_ok(self) -> None:
+        service, token = self._service()
+        parent_rel = "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH))
+        self._mkdir("root/" + parent_rel)
+        self._write(self.root / parent_rel / "deep.txt", b"DEEP")
+        file_id = "p/%s/deep.txt" % parent_rel
+        res = service.trash(token, "work", file_id)
+        self.assertEqual(
+            res, {"ref": {"source_id": "work", "file_id": file_id}, "trashed": True}
+        )
+        self.assertFalse((self.root / parent_rel / "deep.txt").exists())
+        retained = [
+            p
+            for p in self.root.rglob("*")
+            if p.is_file() and p.read_bytes() == b"DEEP"
+        ]
+        self.assertEqual(len(retained), 1, retained)
+
+    def test_trash_too_deep_invalid(self) -> None:
+        service, token = self._service()
+        parent_rel = "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH + 1))
+        file_id = "p/%s/f.txt" % parent_rel
+        with self.assertRaises(ServiceError) as ctx:
+            service.trash(token, "work", file_id)
+        self.assertEqual(ctx.exception.code, "invalid")
+        self.assertFalse(ctx.exception.outcome_uncertain)
 
     def test_trash_removes_from_list_and_keeps_bytes_on_disk(self) -> None:
         service, token = self._service()
@@ -297,17 +398,21 @@ class MoveServiceTests(_TempRoots):
         self.assertTrue((self.root / "x.txt").exists())
 
     def test_file_id_deeper_than_allowed_invalid(self) -> None:
+        # A file whose parent depth exceeds SERVICE_MAX_DEPTH is invalid as a
+        # source; a valid file whose parent is too deep is invalid as a
+        # destination.
         service, token = self._service()
-        deep_id = (
-            "p/" + "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH)) + "/f.txt"
+        too_deep = (
+            "p/" + "/".join("d%d" % i for i in range(SERVICE_MAX_DEPTH + 1)) + "/f.txt"
         )
         with self.assertRaises(ServiceError) as ctx:
-            service.move(token, "work", deep_id, "root", "g.txt")
+            service.move(token, "work", too_deep, "root", "g.txt")
         self.assertEqual(ctx.exception.code, "invalid")
         self.assertFalse(ctx.exception.outcome_uncertain)
 
+        self._write(self.root / "x.txt", b"x")
         with self.assertRaises(ServiceError) as ctx_dest:
-            service.move(token, "work", "p/x.txt", deep_id, "g.txt")
+            service.move(token, "work", "p/x.txt", too_deep, "g.txt")
         self.assertEqual(ctx_dest.exception.code, "invalid")
 
     def test_root_file_id_rejected_for_move_and_trash(self) -> None:
@@ -576,15 +681,11 @@ class MoveHTTPTests(_TempRoots):
         self.assertTrue((self.root / "src.txt").exists())
         self.assertFalse((self.root / "denied.txt").exists())
 
-    def test_http_move_service_unexpected_exception_is_503(self) -> None:
-        # Force an unexpected exception inside the service's move method, which
-        # the adapter invokes from its dispatch; the failure must surface as
-        # 503 unavailable with outcome_uncertain=True, retry_safe=False.
-        class _Boom(Exception):
-            pass
-
-        service = self.adapter._service
-        with mock.patch.object(service, "move", side_effect=_Boom("boom")):
+    def test_http_unexpected_exception_is_503(self) -> None:
+        # Inject the fault on the adapter's already-built service object, so
+        # the real request path runs and only the service call raises.  The
+        # adapter's own unexpected-exception handling then produces the 503.
+        with mock.patch.object(self.adapter.service, "move", side_effect=RuntimeError("boom")):
             raw = self._post(b"/v1/move", self._move_payload(new_name="x.txt"))
         self.assertEqual(self._status(raw), 503, raw[:200])
         envelope = json.loads(self._body(raw))

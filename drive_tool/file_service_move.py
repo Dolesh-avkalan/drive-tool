@@ -74,7 +74,7 @@ class MovableFileService(LocalFileService):
         dest_parts = _parse_canonical_parts(dest_parent_id, allow_root=True)
         dest_canonical = _canonical_id(dest_parts)
 
-        if len(source_parts) > SERVICE_MAX_DEPTH:
+        if len(source_parts) - 1 > SERVICE_MAX_DEPTH:
             _raise_service_error("invalid")
         if len(dest_parts) > SERVICE_MAX_DEPTH:
             _raise_service_error("invalid")
@@ -117,7 +117,7 @@ class MovableFileService(LocalFileService):
         parts = _parse_canonical_parts(file_id, allow_root=False)
         canonical_id = _canonical_id(parts)
 
-        if len(parts) > SERVICE_MAX_DEPTH:
+        if len(parts) - 1 > SERVICE_MAX_DEPTH:
             _raise_service_error("invalid")
 
         source_ref = FileRef(grant.alias, canonical_id)
