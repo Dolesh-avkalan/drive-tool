@@ -1,3 +1,7 @@
+> **History only (since 2026-10-19).** The current rules are in `AGENTS.md` (director contract);
+> the current state is the summary at the top of `session/STATUS.md`. Do not act on the
+> instructions below.
+
 # Resume Drive Tool
 
 Relay for this project (2026-10-16 08:40 UTC): read https://github.com/Dolesh-avkalan/browser-tool/blob/main/HANDOFF.md - it now has chains (after:/expect:), parallel lanes (Gemini, DeepSeek, Sarvam at once), restart recovery and collect:, and attach: for file inputs, all verified on the box.

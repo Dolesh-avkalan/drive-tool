@@ -1,6 +1,6 @@
 # Drive Tool — director plan and architecture
 
-Project lead: Codex in the current session; development team: Gemini and Sarvam.
+Directed through plans on browser-tool's box: see AGENTS.md (director contract and fixed agent roles).
 Status: the read-only core candidate passed actual cloud validation; see session/STATUS.md for exact revisions and evidence. The service and Google Drive connector remain planned.
 
 ## Goal
