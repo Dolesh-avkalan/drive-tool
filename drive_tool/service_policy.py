@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-OPERATIONS: frozenset[str] = frozenset({'find', 'list', 'read', 'save'})
+OPERATIONS: frozenset[str] = frozenset({'find', 'list', 'read', 'save', 'move', 'trash'})
 MAX_TRANSFER_BYTES: int = 1048576
 
 _DENIED = 'access denied'
