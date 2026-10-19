@@ -4,11 +4,14 @@ Owner: Dolesh (GitHub `Dolesh-avkalan`). Money is tight: the director (you, what
 are) plans and decides; cheap web agents do the work through the browser host ("the box").
 Pickup point and recipe: `Dolesh-avkalan/browser-tool` -> `NEXT.md`, then `HANDOFF.md`.
 
-## How work gets done: one way only
-1. Write ONE plan file `plans/<id>.md` on branch `browser-bus` of `Dolesh-avkalan/browser-tool`
-   and push it. The box runs it step by step. Copy the shape of `plans/dt8.md`-`dt14.md` there.
-2. Wait with one background loop that reads only `plans/<id>.summary.md`'s `status:` line.
-3. Read the summary. `done`: check the branch, merge. `needs_director`: the reason is in it.
+## How work gets done: one way only, with the director kit
+Clone `Dolesh-avkalan/browser-tool` and use `D="python3 browser-tool/browser_host/director.py"`
+(no box token needed). Every command ends with a `NEXT:` line: follow it. Plans are checked
+for known wrong turns (`WRONG WAY:`); push anyway only on purpose with `--ack`.
+1. `$D status`  2. `$D plan new feature ID=... PROJECT=drive-tool REPO=Dolesh-avkalan/drive-tool ...`
+   and write the contract into the step texts  3. `$D plan push <id>.md` + `$D plan wait <id>`
+4. `$D plan failures <id>` or `$D verify <id>` (byte check), then merge with the printed
+   expected head. Details: browser-tool `AGENTS.md`.
 
 Never:
 - spawn your own agents, sub-agents or "workers", or let any agent spawn them;
