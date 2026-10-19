@@ -202,6 +202,14 @@ class MoveServiceTests(_TempRoots):
         self.assertEqual((self.root / "src.txt").read_bytes(), b"SRC-BYTES")
         self.assertEqual((self.root / "taken.txt").read_bytes(), b"TARGET-BYTES")
 
+    def test_move_directory_invalid(self) -> None:
+        service, token = self._service()
+        self._mkdir("root/somedir")
+        with self.assertRaises(ServiceError) as ctx:
+            service.move(token, "work", "p/somedir", "root", "other")
+        self.assertEqual(ctx.exception.code, "invalid")
+        self.assertFalse(ctx.exception.outcome_uncertain)
+
     def test_trash_removes_from_list_and_keeps_bytes_on_disk(self) -> None:
         service, token = self._service()
         self._write(self.root / "gone.txt", b"TRASH-ME")
@@ -507,6 +515,90 @@ class MoveHTTPTests(_TempRoots):
         raw = self._post(b"/v1/move", self._move_payload(new_name="z.txt"), token=bad)
         self.assertEqual(self._status(raw), 403, raw[:200])
         self.assertEqual(json.loads(self._body(raw))["error"]["code"], "denied")
+        self.assertTrue((self.root / "src.txt").exists())
+
+    def test_http_invalid_body_with_bad_token_is_denied(self) -> None:
+        # Auth runs before payload validation: a malformed body with a bad
+        # token must be 403 denied, never 400 invalid.
+        bad = _pad_token("http-bad-token-9999")
+        missing_key = json.dumps(
+            {"source_id": "work"}, separators=(",", ":")
+        ).encode("utf-8")
+        extra_key = json.dumps(
+            {
+                "source_id": "work",
+                "file_id": "p/src.txt",
+                "dest_parent_id": "root",
+                "unexpected": True,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        for body in (missing_key, extra_key):
+            raw = self._post(b"/v1/move", body, token=bad)
+            self.assertEqual(self._status(raw), 403, raw[:200])
+            self.assertEqual(json.loads(self._body(raw))["error"]["code"], "denied")
+        self.assertTrue((self.root / "src.txt").exists())
+
+    def test_http_invalid_body_without_move_grant_denied(self) -> None:
+        # Authorization runs before payload validation: a malformed body sent
+        # by an authenticated token whose grant omits "move" must be denied,
+        # never 400 invalid.
+        no_move_token = _pad_token("http-no-move-token-007")
+        grant = _make_grant("work", self.root, operations=_SAVE_OPS)
+        policy = _make_agent("agent2", no_move_token, (grant,))
+        adapter = MoveHTTPAdapter((policy,), port=0, socket_timeout=5.0)
+        self.addCleanup(lambda: adapter.close(timeout=5.0))
+        old_adapter, self.adapter = self.adapter, adapter
+        try:
+            body = json.dumps(
+                {"source_id": "work", "unexpected": True}, separators=(",", ":")
+            ).encode("utf-8")
+            raw = self._post(b"/v1/move", body, token=no_move_token)
+            self.assertEqual(self._status(raw), 403, raw[:200])
+            self.assertEqual(json.loads(self._body(raw))["error"]["code"], "denied")
+        finally:
+            self.adapter = old_adapter
+        self.assertTrue((self.root / "src.txt").exists())
+
+    def test_http_move_insufficient_grant_is_denied(self) -> None:
+        no_move_token = _pad_token("http-no-move-token-008")
+        grant = _make_grant("work", self.root, operations=_SAVE_OPS)
+        policy = _make_agent("agent3", no_move_token, (grant,))
+        adapter = MoveHTTPAdapter((policy,), port=0, socket_timeout=5.0)
+        self.addCleanup(lambda: adapter.close(timeout=5.0))
+        old_adapter, self.adapter = self.adapter, adapter
+        try:
+            raw = self._post(
+                b"/v1/move",
+                self._move_payload(new_name="denied.txt"),
+                token=no_move_token,
+            )
+            self.assertEqual(self._status(raw), 403, raw[:200])
+            envelope = json.loads(self._body(raw))
+            self.assertEqual(envelope["error"]["code"], "denied")
+            self.assertFalse(envelope["error"]["outcome_uncertain"])
+            self.assertFalse(envelope["error"]["retry_safe"])
+        finally:
+            self.adapter = old_adapter
+        self.assertTrue((self.root / "src.txt").exists())
+        self.assertFalse((self.root / "denied.txt").exists())
+
+    def test_http_unexpected_exception_is_503(self) -> None:
+        # Force an unexpected exception inside the adapter's request handler;
+        # the failure must surface as 503 unavailable, retry_safe=False.
+        class _Boom(Exception):
+            pass
+
+        with unittest.mock.patch.object(
+            self.adapter, "_dispatch", side_effect=_Boom("boom")
+        ):
+            raw = self._post(b"/v1/move", self._move_payload(new_name="x.txt"))
+        self.assertEqual(self._status(raw), 503, raw[:200])
+        envelope = json.loads(self._body(raw))
+        self.assertFalse(envelope.get("ok"))
+        self.assertEqual(envelope["error"]["code"], "unavailable")
+        self.assertTrue(envelope["error"]["outcome_uncertain"])
+        self.assertFalse(envelope["error"]["retry_safe"])
         self.assertTrue((self.root / "src.txt").exists())
 
     def test_client_roundtrip_move_then_read(self) -> None:
