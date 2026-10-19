@@ -16,17 +16,26 @@ import signal
 import sys
 import threading
 
+from drive_tool.audit import AuditLog, AuditedService
 from drive_tool.file_service_move import MovableFileService
 from drive_tool.http_move import MoveHTTPAdapter
 from drive_tool.service_policy import AgentPolicy, SourceGrant
 
-__all__ = ["ConfigError", "load_config", "hash_token", "run", "main"]
+__all__ = [
+    "ConfigError",
+    "load_config",
+    "load_audit_log",
+    "hash_token",
+    "run",
+    "main",
+]
 
 _MAX_CONFIG_BYTES = 1024 * 1024
 _OPERATIONS = frozenset({"list", "find", "read", "save", "move", "trash"})
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 _TOP_KEYS = frozenset({"port", "agents"})
+_TOP_OPTIONAL_KEYS = frozenset({"audit_log"})
 _AGENT_KEYS = frozenset({"agent_id", "token_sha256", "grants"})
 _GRANT_REQUIRED_KEYS = frozenset({"alias", "root", "operations"})
 _GRANT_OPTIONAL_KEYS = frozenset({"max_read_bytes", "max_write_bytes"})
@@ -191,12 +200,39 @@ def _parse_agent(value, index):
     except (TypeError, ValueError) as exc:
         raise ConfigError("%s is invalid: %s" % (what, exc)) from None
 
+def _validate_audit_log_path(value, agents):
+    """Validate ``audit_log`` value against grant roots; return it unchanged."""
+    if not isinstance(value, str):
+        raise ConfigError("audit_log must be a string")
+    if not value:
+        raise ConfigError("audit_log must be a nonempty path")
+    if not os.path.isabs(value):
+        raise ConfigError("audit_log must be an absolute path")
+    parent = os.path.dirname(value)
+    if not parent or not os.path.isdir(parent):
+        raise ConfigError("audit_log parent directory must exist")
+    audit_real = os.path.realpath(value)
+    for agent in agents:
+        for grant in agent.grants:
+            root_real = os.path.realpath(grant.root)
+            if os.path.commonpath([audit_real, root_real]) == root_real:
+                raise ConfigError(
+                    "audit_log must not be inside a grant root"
+                )
+    return value
+
+def _load_parsed(path):
+    data = _load_json(path)
+    _require_mapping(data, "config")
+    _require_keys(
+        data, _TOP_KEYS, _TOP_KEYS | _TOP_OPTIONAL_KEYS, "config"
+    )
+    return data
+
 def load_config(path):
     """Load and validate the config file, returning ``(port, agents)``."""
 
-    data = _load_json(path)
-    _require_mapping(data, "config")
-    _require_keys(data, _TOP_KEYS, _TOP_KEYS, "config")
+    data = _load_parsed(path)
 
     port = _parse_port(data["port"])
     agents_raw = data["agents"]
@@ -219,7 +255,19 @@ def load_config(path):
             raise ConfigError("duplicate token_sha256")
         seen_digests.add(agent.token_sha256)
 
+    if "audit_log" in data:
+        _validate_audit_log_path(data["audit_log"], agents)
+
     return port, agents
+
+def load_audit_log(path):
+    """Return the validated ``audit_log`` path, or ``None`` when absent."""
+
+    data = _load_parsed(path)
+    if "audit_log" not in data:
+        return None
+    _, agents = load_config(path)
+    return _validate_audit_log_path(data["audit_log"], agents)
 
 def hash_token(token):
     """Return the lowercase hex SHA-256 of a UTF-8 encoded token."""
@@ -228,12 +276,44 @@ def hash_token(token):
         raise TypeError("token must be a str")
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
+class _AuditedMoveAdapter(MoveHTTPAdapter):
+    """MoveHTTPAdapter whose service is the audited wrapper from construction.
+
+    The base constructor validates ``service`` as a ``MovableFileService`` and
+    starts the accept thread, so the audited wrapper cannot be installed after
+    the fact without a race window. This subclass passes the raw service to the
+    base constructor (satisfying its type check) and redirects the inherited
+    ``self._service`` lookups to the wrapper via a property.
+    """
+
+    __slots__ = ("_audited",)
+
+    def __init__(self, service, audited, port):
+        self._audited = audited
+        super().__init__(service=service, port=port)
+
+    @property
+    def _service(self):
+        return self._audited
+
+    @_service.setter
+    def _service(self, value):
+        pass
+
+def _build_adapter(agents, audit_path, port):
+    """Construct the adapter, wiring in AuditedService when configured."""
+    service = MovableFileService(agents)
+    if audit_path is None:
+        return MoveHTTPAdapter(service=service, port=port)
+    audited = AuditedService(service, agents, AuditLog(audit_path))
+    return _AuditedMoveAdapter(service, audited, port)
+
 def run(config_path, *, ready=None, stop=None):
     """Load config, start the adapter, wait for ``stop``, then close."""
 
     port, agents = load_config(config_path)
-    service = MovableFileService(agents)
-    adapter = MoveHTTPAdapter(service=service, port=port)
+    audit_path = load_audit_log(config_path)
+    adapter = _build_adapter(agents, audit_path, port)
     try:
         if ready is not None:
             ready(adapter.port)
@@ -274,6 +354,7 @@ def main(argv=None):
 
     try:
         port, agents = load_config(args.config)
+        audit_path = load_audit_log(args.config)
     except ConfigError as exc:
         sys.stderr.write("config error: %s\n" % (exc,))
         return 2
@@ -286,8 +367,7 @@ def main(argv=None):
     old_term = signal.signal(signal.SIGTERM, _handle_signal)
     old_int = signal.signal(signal.SIGINT, _handle_signal)
     try:
-        service = MovableFileService(agents)
-        adapter = MoveHTTPAdapter(service=service, port=port)
+        adapter = _build_adapter(agents, audit_path, port)
         try:
             sys.stderr.write(
                 "drive-tool listening on 127.0.0.1:%d (%d agents)\n"
