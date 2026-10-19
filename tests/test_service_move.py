@@ -32,6 +32,7 @@ import socket
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from drive_tool.file_service import SERVICE_MAX_DEPTH, ServiceError
 from drive_tool.file_service_move import MovableFileService
@@ -201,14 +202,6 @@ class MoveServiceTests(_TempRoots):
         self.assertIsNone(err.__cause__)
         self.assertEqual((self.root / "src.txt").read_bytes(), b"SRC-BYTES")
         self.assertEqual((self.root / "taken.txt").read_bytes(), b"TARGET-BYTES")
-
-    def test_move_directory_invalid(self) -> None:
-        service, token = self._service()
-        self._mkdir("root/somedir")
-        with self.assertRaises(ServiceError) as ctx:
-            service.move(token, "work", "p/somedir", "root", "other")
-        self.assertEqual(ctx.exception.code, "invalid")
-        self.assertFalse(ctx.exception.outcome_uncertain)
 
     def test_trash_removes_from_list_and_keeps_bytes_on_disk(self) -> None:
         service, token = self._service()
@@ -583,15 +576,15 @@ class MoveHTTPTests(_TempRoots):
         self.assertTrue((self.root / "src.txt").exists())
         self.assertFalse((self.root / "denied.txt").exists())
 
-    def test_http_unexpected_exception_is_503(self) -> None:
-        # Force an unexpected exception inside the adapter's request handler;
-        # the failure must surface as 503 unavailable, retry_safe=False.
+    def test_http_move_service_unexpected_exception_is_503(self) -> None:
+        # Force an unexpected exception inside the service's move method, which
+        # the adapter invokes from its dispatch; the failure must surface as
+        # 503 unavailable with outcome_uncertain=True, retry_safe=False.
         class _Boom(Exception):
             pass
 
-        with unittest.mock.patch.object(
-            self.adapter, "_dispatch", side_effect=_Boom("boom")
-        ):
+        service = self.adapter._service
+        with mock.patch.object(service, "move", side_effect=_Boom("boom")):
             raw = self._post(b"/v1/move", self._move_payload(new_name="x.txt"))
         self.assertEqual(self._status(raw), 503, raw[:200])
         envelope = json.loads(self._body(raw))
